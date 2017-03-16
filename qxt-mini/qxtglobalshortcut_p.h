@@ -56,7 +56,11 @@ public:
     static bool eventFilter(void* message);
     bool nativeEventFilter(const QByteArray & eventType, void * message, long * result) override;
 
-    static void activateShortcut(quint32 nativeKey, quint32 nativeMods);
+#ifndef Q_OS_MAC
+    static void activateShortcut(quint32 nativeKey, quint32 nativeMods, bool = true);
+#else
+    static void activateShortcut(quint32 nativeKey, quint32 nativeMods, bool pressed);
+#endif
 
 private:
     struct event_filter_installer;

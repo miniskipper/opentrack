@@ -143,7 +143,7 @@ bool QxtGlobalShortcutPrivate::unsetShortcut()
     return res;
 }
 
-void QxtGlobalShortcutPrivate::activateShortcut(quint32 nativeKey, quint32 nativeMods)
+void QxtGlobalShortcutPrivate::activateShortcut(quint32 nativeKey, quint32 nativeMods, bool pressed)
 {
 #ifndef Q_OS_MAC
     using IT = decltype(shortcuts.end());
@@ -156,7 +156,7 @@ void QxtGlobalShortcutPrivate::activateShortcut(quint32 nativeKey, quint32 nativ
             break;
         auto ptr = *it;
         if (ptr->isEnabled())
-            emit ptr->activated();
+            emit ptr->activated(pressed);
     }
 #else
     QxtGlobalShortcut* shortcut = shortcuts.value(qMakePair(nativeKey, nativeMods));

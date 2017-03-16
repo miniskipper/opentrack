@@ -42,6 +42,8 @@
 #include "qplatformnativeinterface.h"
 #include "compat/util.hpp"
 
+#include <cstddef>
+
 static constexpr quint32 AllMods = ShiftMask|LockMask|ControlMask|Mod1Mask|Mod2Mask|Mod3Mask|Mod4Mask|Mod5Mask;
 
 typedef int (*X11ErrorHandler)(Display *display, XErrorEvent *event);
@@ -244,11 +246,22 @@ bool QxtGlobalShortcutPrivate::nativeEventFilter(const QByteArray & eventType,
 {
     Q_UNUSED(result);
 
+    bool pressed = true;
+    static_assert(sizeof(xcb_key_release_event_t) == sizeof(xcb_key_press_event_t), "");
+    static_assert(offsetof(xcb_key_release_event_t, keycode) == offsetof(xcb_key_press_event_t, keycode), "");
+    static_assert(sizeof(xcb_key_release_event_t::keycode) == sizeof(xcb_key_press_event_t::keycode), "");
+    static_assert(offsetof(xcb_key_release_event_t, state) == offsetof(xcb_key_press_event_t, state), "");
+    static_assert(sizeof(xcb_key_release_event_t::state) == sizeof(xcb_key_press_event_t::state), "");
     xcb_key_press_event_t *kev = 0;
     if (eventType == "xcb_generic_event_t") {
         xcb_generic_event_t *ev = static_cast<xcb_generic_event_t *>(message);
         if ((ev->response_type & 127) == XCB_KEY_PRESS)
             kev = static_cast<xcb_key_press_event_t *>(message);
+        else if ((ev->response_type & 127) == XCB_KEY_RELEASE)
+        {
+            pressed = false;
+            kev = static_cast<xcb_key_pressed_event_t*>(message);
+        }
     }
 
     if (kev != 0) {
@@ -269,7 +282,7 @@ bool QxtGlobalShortcutPrivate::nativeEventFilter(const QByteArray & eventType,
             keystate |= AltGrMask;
 #endif
 
-        activateShortcut(keycode, keystate);
+        activateShortcut(keycode, keystate, pressed);
     }
     return false;
 }
