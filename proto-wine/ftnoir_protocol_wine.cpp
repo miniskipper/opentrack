@@ -29,7 +29,7 @@ wine::~wine()
     }
     wrapper.kill();
     wrapper.close();
-    //shm_unlink("/" WINE_SHM_NAME);
+    shm_unlink(WINE_SHM_NAME);
 }
 
 void wine::pose( const double *headpose )
