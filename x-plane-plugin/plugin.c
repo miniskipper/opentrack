@@ -22,6 +22,8 @@
 #include <XPLMDataAccess.h>
 #include <XPLMProcessing.h>
 #include <XPLMUtilities.h>
+#include <XPLMMenus.h>
+
 
 #ifndef PLUGIN_API
 #define PLUGIN_API
@@ -33,13 +35,21 @@
 #define WINE_SHM_NAME "facetracknoir-wine-shm"
 #define WINE_MTX_NAME "facetracknoir-wine-mtx"
 
+#define MAX_LASTCHANGE 5
+
 #define BUILD_compat
 #include "compat/export.hpp"
+
+void menuhandler(void *mRef, void *iRef);
+
 
 enum Axis {
     TX = 0, TY, TZ, Yaw, Pitch, Roll
 };
 
+enum Menu {
+    SAVE_OFFSET = 0, DISABLE, ENABLE, TOGGLE_TRANSLATION
+};
 
 
 #ifdef DEBUG
@@ -49,33 +59,36 @@ enum Axis {
 #endif
 
 
-
-
-
-typedef struct PortableLockedShm
+typedef struct shmdata
 {
     void* mem;
-    int fd, size;
-} PortableLockedShm;
+    int fd;
+    int size;
+    bool opened;
+    int lastchange;
+    char *name;
+} shmdata;
 
-typedef struct WineSHM
+typedef struct winedata
 {
     double data[6];
     int gameid, gameid2;
     unsigned char table[8];
     bool stop;
-} WineSHM;
+} winedata;
 
-static PortableLockedShm* lck_posix = NULL;
-static WineSHM* shm_posix = NULL;
-static double data_last[6];
+static shmdata *shm = NULL;
+static winedata *data = NULL;
+static double olddata[6];
+
 static void *view_x, *view_y, *view_z, *view_heading, *view_pitch, *view_roll;
 static float offset_x, offset_y, offset_z;
+
 static XPLMCommandRef track_toggle = NULL, translation_disable_toggle = NULL;
+
 static int track_disabled = 1;
 static int translation_disabled;
-
-static float nextrun = -1.0;
+static float interval = 2.0;
 
 void mylog(char *format, ...){
     char buffer[1024];
@@ -88,12 +101,64 @@ void mylog(char *format, ...){
     va_end(args);
 }
 
+
+void registerMenus(){
+    DEBUG_LOG("Registering menus\n");
+    int menuitem = XPLMAppendMenuItem(XPLMFindPluginsMenu(), "opentrack", NULL, 1);
+    XPLMMenuID menuid = XPLMCreateMenu("opentrack", XPLMFindPluginsMenu(), menuitem, menuhandler, NULL);
+    XPLMAppendMenuItem(menuid, "Enable plugin", (void*)ENABLE, 1);
+    XPLMAppendMenuItem(menuid, "Disable plugin", (void*)DISABLE, 1);
+    XPLMAppendMenuItem(menuid, "Toggle translation movement", (void*)TOGGLE_TRANSLATION, 1);
+    XPLMAppendMenuItem(menuid, "Save Offset", (void*)SAVE_OFFSET, 1);
+}
+
+
 static void reinit_offset() {
     DEBUG_LOG("Reinit Offset\n");
     offset_x = XPLMGetDataf(view_x);
     offset_y = XPLMGetDataf(view_y);
     offset_z = XPLMGetDataf(view_z);
     DEBUG_LOG("Offset Values: %f %f %f\n", offset_x, offset_y, offset_z);
+}
+
+
+bool openshm(char *shm_name){
+    DEBUG_LOG("openshm %s\n", shm_name);
+    shm->name = shm_name;
+    shm->fd = shm_open(shm->name, O_RDONLY, 0600);
+    if(shm->fd < 0){
+        if(interval < 0){
+            mylog("shm_open failed: %s\n", strerror(errno));
+        }
+        interval = 1.0;
+        return false;
+    }
+    shm->mem = mmap(0, sizeof(winedata), PROT_READ, MAP_SHARED, shm->fd, 0);
+    if(shm->mem == MAP_FAILED){
+        mylog("mmap failed: %s\n", strerror(errno));
+        interval = 2.0;
+        return false;
+    }
+    shm->opened = true;
+    data = (winedata *)shm->mem;
+    DEBUG_LOG("openshm success\n");
+
+    return true;
+}
+
+void closeshm(){
+    DEBUG_LOG("closeshm %s\n", shm->name);
+    munmap(shm->mem, sizeof(winedata));
+    close(shm->fd);
+    shm->opened = false;
+    DEBUG_LOG("shm closed\n");
+}
+
+void init(){
+    DEBUG_LOG("init\n");
+    shm = calloc(1, sizeof(shmdata));
+    shm->opened = false;
+    DEBUG_LOG("init done\n");
 }
 
 #ifdef __GNUC__
@@ -103,98 +168,57 @@ static void reinit_offset() {
 #endif
 
 
-
-PortableLockedShm* PortableLockedShm_init(const char *shmName, const char *OT_UNUSED(mutexName), int mapSize)
-{
-    DEBUG_LOG("Initializing SHM\n");
-    PortableLockedShm* self = malloc(sizeof(PortableLockedShm));
-    char shm_filename[NAME_MAX];
-    shm_filename[0] = '/';
-    strncpy(shm_filename+1, shmName, NAME_MAX-2);
-    shm_filename[NAME_MAX-1] = '\0';
-    /* (void) shm_unlink(shm_filename); */
-    self->fd = shm_open(shm_filename, O_RDWR | O_CREAT, 0600);
-    if(self->fd < 0){
-        mylog("shm_open failed: %s\n", strerror(errno));
-        return NULL;
-    }
-    if(ftruncate(self->fd, mapSize) != 0){
-        mylog("ftruncate failed: %s\n", strerror(errno));
-        return NULL;
-    }
-    self->mem = mmap(NULL, mapSize, PROT_READ|PROT_WRITE, MAP_SHARED, self->fd, (off_t)0);
-    if(self->mem == (void *)-1){
-        mylog("mmap failed: %s\n", strerror(errno));
-        return NULL;
-    }
-    DEBUG_LOG("SHM Initialized\n");
-    return self;
-}
-
-void PortableLockedShm_free(PortableLockedShm* self)
-{
-    DEBUG_LOG("Freeing SHM\n");
-    (void) munmap(self->mem, self->size);
-    (void) close(self->fd);
-    free(self);
-    DEBUG_LOG("SHM freed\n");
-}
-
-void PortableLockedShm_lock(PortableLockedShm* self)
-{
-    DEBUG_LOG("Locking SHM\n");
-    flock(self->fd, LOCK_SH);
-    DEBUG_LOG("Locked SHM\n");
-}
-
-void PortableLockedShm_unlock(PortableLockedShm* self)
-{
-    DEBUG_LOG("Unlocking SHM\n");
-    flock(self->fd, LOCK_UN);
-    DEBUG_LOG("Unlocked SHM\n");
-}
-
 float write_head_position(
         float                OT_UNUSED(inElapsedSinceLastCall),
         float                OT_UNUSED(inElapsedTimeSinceLastFlightLoop),
         int                  OT_UNUSED(inCounter),
         void *               OT_UNUSED(inRefcon) )
 {
-    if (lck_posix != NULL && shm_posix != NULL) {
 
-        PortableLockedShm_lock(lck_posix);
-        //only set the view if tracking is running
-        if(memcmp(shm_posix, data_last, sizeof(shm_posix->data)) != 0){
-            DEBUG_LOG("View changed, setting new data\n");
-            //we received data, from now on run every frame
-            nextrun = -1.0;
-            if (!translation_disabled)
-            {
-                DEBUG_LOG("Setting new translation data: %f %f %f\n", shm_posix->data[TX], shm_posix->data[TY], shm_posix->data[TZ]);
-                XPLMSetDataf(view_x, shm_posix->data[TX] * 1e-3 + offset_x);
-                XPLMSetDataf(view_y, shm_posix->data[TY] * 1e-3 + offset_y);
-                XPLMSetDataf(view_z, shm_posix->data[TZ] * 1e-3 + offset_z);
-            }
-            DEBUG_LOG("Setting new rotation data: %f %f %f\n", shm_posix->data[Yaw], shm_posix->data[Pitch], shm_posix->data[Roll]);
-            XPLMSetDataf(view_heading, shm_posix->data[Yaw] * 180 / M_PI);
-            XPLMSetDataf(view_pitch, shm_posix->data[Pitch] * 180 / M_PI);
-            XPLMSetDataf(view_roll, shm_posix->data[Roll] * 180 / M_PI);
-        } else {
-            //reset roll, otherwise it would be stuck at last angle
-            if(nextrun < 0){
-                mylog("Tracking stopped\n");
-            }
-            XPLMSetDataf(view_roll, 0);
-            //from now on only run every 2 seconds
-            nextrun = 2.0;
+    DEBUG_LOG("frameloop %i  lastchange=%i\n", inCounter, shm->lastchange);
+    if(!shm->opened){
+        if(!openshm(WINE_SHM_NAME)){
+            DEBUG_LOG("openshm failed\n");
         }
-        
-        DEBUG_LOG("Save current data\n");
-        memcpy(&data_last, &shm_posix->data, sizeof(data_last));
-
-        PortableLockedShm_unlock(lck_posix);
     }
-    return nextrun;
+
+    if(shm->opened){
+        DEBUG_LOG("compare data\n");
+        if(memcmp(olddata, data->data, sizeof(olddata)) != 0){
+            DEBUG_LOG("data changed, setting view\n");
+            shm->lastchange=0;
+            interval = -1.0;            
+        } else {
+            shm->lastchange++;
+            if(shm->lastchange > MAX_LASTCHANGE && interval < 0){
+                mylog("Tracking stopped\n");
+                interval = 2.0;
+                closeshm();
+            }
+        }
+    }
+
+    if(shm->opened && shm->lastchange <= MAX_LASTCHANGE){
+        if (!translation_disabled)
+        {
+            DEBUG_LOG("Setting new translation data: %f %f %f\n", data->data[TX], data->data[TY], data->data[TZ]);
+            XPLMSetDataf(view_x, data->data[TX] * 1e-3 * -1  + offset_x);
+            XPLMSetDataf(view_y, data->data[TY] * 1e-3 + offset_y);
+            XPLMSetDataf(view_z, data->data[TZ] * 1e-3 + offset_z);
+        }
+        DEBUG_LOG("Setting new rotation data: %f %f %f\n", data->data[Yaw], data->data[Pitch], data->data[Roll]);
+        XPLMSetDataf(view_heading, data->data[Yaw] * 180 / M_PI);
+        XPLMSetDataf(view_pitch, data->data[Pitch] * 180 / M_PI);
+        XPLMSetDataf(view_roll, data->data[Roll] * 180 * -1 / M_PI);
+
+        DEBUG_LOG("Save current data\n");
+        memcpy(&olddata, &data->data, sizeof(olddata));
+    } else {
+        //reset roll, otherwise it would be stuck at last angle
+        XPLMSetDataf(view_roll, 0);        
+    }
+    
+    return interval;
 }
 
 static int TrackToggleHandler( XPLMCommandRef inCommand,
@@ -214,6 +238,7 @@ static int TrackToggleHandler( XPLMCommandRef inCommand,
     {
         //Disable
         XPLMUnregisterFlightLoopCallback(write_head_position, NULL);
+        closeshm();
     }
     track_disabled = !track_disabled;
     return 0;
@@ -258,15 +283,9 @@ PLUGIN_API OTR_COMPAT_EXPORT int XPluginStart ( char * outName, char * outSignat
                                 1,
                                 (void*)0);
 
-
     if (view_x && view_y && view_z && view_heading && view_pitch && view_roll && track_toggle && translation_disable_toggle) {
-        lck_posix = PortableLockedShm_init(WINE_SHM_NAME, WINE_MTX_NAME, sizeof(WineSHM));
-        if (lck_posix == NULL || lck_posix->mem == (void*)-1) {
-            fprintf(stderr, "opentrack failed to init SHM!\n");
-            return 0;
-        }
-        shm_posix = (WineSHM*) lck_posix->mem;
-        memset(shm_posix, 0, sizeof(WineSHM));
+        init();
+        registerMenus(); 
         strcpy(outName, "opentrack");
         strcpy(outSignature, "opentrack - freetrack lives!");
         strcpy(outDescription, "head tracking view control");
@@ -277,12 +296,10 @@ PLUGIN_API OTR_COMPAT_EXPORT int XPluginStart ( char * outName, char * outSignat
 }
 
 PLUGIN_API OTR_COMPAT_EXPORT void XPluginStop ( void ) {
-    if (lck_posix)
+    if (shm->opened)
     {
         mylog("Stop plugin\n");
-        PortableLockedShm_free(lck_posix);
-        lck_posix = NULL;
-        shm_posix = NULL;
+        closeshm();
     }
 }
 
@@ -295,6 +312,7 @@ PLUGIN_API OTR_COMPAT_EXPORT void XPluginEnable ( void ) {
 PLUGIN_API OTR_COMPAT_EXPORT void XPluginDisable ( void ) {
     mylog("Disable plugin\n");
     XPLMUnregisterFlightLoopCallback(write_head_position, NULL);
+    closeshm();
     track_disabled = 1;
 }
 
@@ -308,6 +326,29 @@ PLUGIN_API OTR_COMPAT_EXPORT void XPluginReceiveMessage(
     case XPLM_MSG_PLANE_LOADED:
     case XPLM_MSG_AIRPORT_LOADED:
         reinit_offset();
+        break;
+    default:
+        break;
+    }
+}
+
+
+void menuhandler(void *mRef, void *iRef){
+    unsigned int ref = (uintptr_t) iRef;
+    DEBUG_LOG("menuitem %i\n", ref);
+    switch(ref){
+    case SAVE_OFFSET:
+        reinit_offset();
+        break;
+    case ENABLE:
+        XPluginEnable();
+        break;
+    case DISABLE:
+        XPluginDisable();
+        break;
+    case TOGGLE_TRANSLATION:
+        mylog("toggle translation\n");
+        translation_disabled = !translation_disabled;
         break;
     default:
         break;
