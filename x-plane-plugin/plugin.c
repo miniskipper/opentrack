@@ -48,7 +48,7 @@ enum Axis {
 };
 
 enum Menu {
-    SAVE_OFFSET = 0, DISABLE, ENABLE, TOGGLE_TRANSLATION
+    SAVE_OFFSET = 0, DISABLE, ENABLE, TOGGLE_TRANSLATION, RESET_VIEW
 };
 
 
@@ -82,9 +82,9 @@ static winedata *data = NULL;
 static double olddata[6];
 
 static void *view_x, *view_y, *view_z, *view_heading, *view_pitch, *view_roll;
-static float offset_x, offset_y, offset_z;
+static float offset_x, offset_y, offset_z, offset_yaw, offset_pitch, offset_roll, offset_cockpit_x, offset_cockpit_y, offset_cockpit_z;
 
-static XPLMCommandRef track_toggle = NULL, translation_disable_toggle = NULL;
+static XPLMCommandRef track_toggle = NULL, translation_disable_toggle = NULL, reset_view_toggle = NULL;
 
 static int track_disabled = 1;
 static int translation_disabled;
@@ -109,16 +109,33 @@ void registerMenus(){
     XPLMAppendMenuItem(menuid, "Enable plugin", (void*)ENABLE, 1);
     XPLMAppendMenuItem(menuid, "Disable plugin", (void*)DISABLE, 1);
     XPLMAppendMenuItem(menuid, "Toggle translation movement", (void*)TOGGLE_TRANSLATION, 1);
-    XPLMAppendMenuItem(menuid, "Save Offset", (void*)SAVE_OFFSET, 1);
+    XPLMAppendMenuItem(menuid, "Save View Offset", (void*)SAVE_OFFSET, 1);
+    XPLMAppendMenuItem(menuid, "Reset View", (void*)RESET_VIEW, 1);
 }
 
+static void save_view() {
+    DEBUG_LOG("Save View\n");
+    offset_cockpit_x = XPLMGetDataf(view_x);
+    offset_cockpit_y = XPLMGetDataf(view_y);
+    offset_cockpit_z = XPLMGetDataf(view_z);
+    DEBUG_LOG("View saved: %f %f %f\n", offset_cockpit_x, offset_cockpit_y, offset_cockpit_z);
+}
 
-static void reinit_offset() {
+static void reinit_translational_offset() {
     DEBUG_LOG("Reinit Offset\n");
-    offset_x = XPLMGetDataf(view_x);
-    offset_y = XPLMGetDataf(view_y);
-    offset_z = XPLMGetDataf(view_z);
+    offset_x = data->data[TX];
+    offset_y = data->data[TY];
+    offset_z = data->data[TZ];
     DEBUG_LOG("Offset Values: %f %f %f\n", offset_x, offset_y, offset_z);
+}
+
+static void reinit_rotational_offset() {
+    DEBUG_LOG("Reinit View\n");
+    offset_yaw = data->data[Yaw];
+    offset_pitch = data->data[Pitch];
+    offset_roll = data->data[Roll];
+    reinit_translational_offset();
+    DEBUG_LOG("View Values: %f %f %f\n", offset_yaw, offset_pitch, offset_roll);
 }
 
 
@@ -202,14 +219,14 @@ float write_head_position(
         if (!translation_disabled)
         {
             DEBUG_LOG("Setting new translation data: %f %f %f\n", data->data[TX], data->data[TY], data->data[TZ]);
-            XPLMSetDataf(view_x, data->data[TX] * 1e-3 * -1  + offset_x);
-            XPLMSetDataf(view_y, data->data[TY] * 1e-3 + offset_y);
-            XPLMSetDataf(view_z, data->data[TZ] * 1e-3 + offset_z);
+            XPLMSetDataf(view_x, (data->data[TX] - offset_x) * 1e-3 * -1 + offset_cockpit_x);
+            XPLMSetDataf(view_y, (data->data[TY] - offset_y) * 1e-3 + offset_cockpit_y);
+            XPLMSetDataf(view_z, (data->data[TZ] - offset_z) * 1e-3 + offset_cockpit_z);
         }
         DEBUG_LOG("Setting new rotation data: %f %f %f\n", data->data[Yaw], data->data[Pitch], data->data[Roll]);
-        XPLMSetDataf(view_heading, data->data[Yaw] * 180 / M_PI);
-        XPLMSetDataf(view_pitch, data->data[Pitch] * 180 / M_PI);
-        XPLMSetDataf(view_roll, data->data[Roll] * 180 * -1 / M_PI);
+        XPLMSetDataf(view_heading, (data->data[Yaw] - offset_yaw) * 180 / M_PI);
+        XPLMSetDataf(view_pitch, (data->data[Pitch] - offset_pitch ) * 180 / M_PI);
+        XPLMSetDataf(view_roll, (data->data[Roll] - offset_roll) * 180 * -1 / M_PI);
 
         DEBUG_LOG("Save current data\n");
         memcpy(&olddata, &data->data, sizeof(olddata));
@@ -232,12 +249,13 @@ static int TrackToggleHandler( XPLMCommandRef inCommand,
 
         // Reinit the offsets when we re-enable the plugin
         if ( !translation_disabled )
-            reinit_offset();
+            reinit_translational_offset();
     }
     else
     {
         //Disable
         XPLMUnregisterFlightLoopCallback(write_head_position, NULL);
+        XPLMSetDataf(view_roll, 0);
         closeshm();
     }
     track_disabled = !track_disabled;
@@ -252,7 +270,19 @@ static int TranslationToggleHandler( XPLMCommandRef inCommand,
     if (!translation_disabled)
     {
         // Reinit the offsets when we re-enable the translations so that we can "move around"
-        reinit_offset();
+        reinit_translational_offset();
+    }
+    return 0;
+}
+
+static int ResetViewToggleHandler( XPLMCommandRef inCommand,
+                                     XPLMCommandPhase inPhase,
+                                     void * inRefCon )
+{
+    if (!track_disabled)
+    {
+        // Reinit the offsets when we re-enable the translations so that we can "move around"
+        reinit_rotational_offset();
     }
     return 0;
 }
@@ -271,6 +301,7 @@ PLUGIN_API OTR_COMPAT_EXPORT int XPluginStart ( char * outName, char * outSignat
     DEBUG_LOG("Creating commands\n");
     track_toggle = XPLMCreateCommand("opentrack/toggle", "Disable/Enable head tracking");
     translation_disable_toggle = XPLMCreateCommand("opentrack/toggle_translation", "Disable/Enable input translation from opentrack");
+    reset_view_toggle = XPLMCreateCommand("opentrack/reset_view", "Reset the 3D View");
 
     DEBUG_LOG("Registering commands\n");
     XPLMRegisterCommandHandler( track_toggle,
@@ -280,6 +311,11 @@ PLUGIN_API OTR_COMPAT_EXPORT int XPluginStart ( char * outName, char * outSignat
 
     XPLMRegisterCommandHandler( translation_disable_toggle,
                                 TranslationToggleHandler,
+                                1,
+                                (void*)0);
+                                
+    XPLMRegisterCommandHandler( reset_view_toggle,
+                                ResetViewToggleHandler,
                                 1,
                                 (void*)0);
 
@@ -325,7 +361,7 @@ PLUGIN_API OTR_COMPAT_EXPORT void XPluginReceiveMessage(
     switch (inMessage) {
     case XPLM_MSG_PLANE_LOADED:
     case XPLM_MSG_AIRPORT_LOADED:
-        reinit_offset();
+        save_view();
         break;
     default:
         break;
@@ -337,8 +373,11 @@ void menuhandler(void *mRef, void *iRef){
     unsigned int ref = (uintptr_t) iRef;
     DEBUG_LOG("menuitem %i\n", ref);
     switch(ref){
+    case RESET_VIEW:
+        reinit_rotational_offset();
+        break;
     case SAVE_OFFSET:
-        reinit_offset();
+        save_view();
         break;
     case ENABLE:
         XPluginEnable();
