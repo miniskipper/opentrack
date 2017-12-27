@@ -23,7 +23,7 @@
 #endif
 #include <sixense.h>
 
-Hydra_Tracker::Hydra_Tracker() : should_quit(false) {}
+Hydra_Tracker::Hydra_Tracker() {}
 
 #include <sixense_math.hpp>
 
@@ -33,9 +33,11 @@ Hydra_Tracker::~Hydra_Tracker()
     sixenseExit();
 }
 
-void Hydra_Tracker::start_tracker(QFrame*)
+module_status Hydra_Tracker::start_tracker(QFrame*)
 {
     sixenseInit();
+
+    return status_ok();
 }
 
 void Hydra_Tracker::data(double *data)
@@ -52,7 +54,7 @@ void Hydra_Tracker::data(double *data)
     data[TX] = double(acd.controllers[0].pos[0])/50;
     data[TY] = double(acd.controllers[0].pos[1])/50;
     data[TZ] = double(acd.controllers[0].pos[2])/50;
-    static constexpr double r2d = 180/M_PI;
+    constexpr double r2d = 180/M_PI;
     data[Yaw] = double(ypr[0]) * r2d;
     data[Pitch] = double(ypr[1]) * r2d;
     data[Roll] = double(ypr[2]) * r2d;

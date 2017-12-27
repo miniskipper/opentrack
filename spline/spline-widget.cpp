@@ -47,27 +47,24 @@ spline_widget::~spline_widget()
         QObject::disconnect(connection);
 }
 
-void spline_widget::setConfig(spline* spl)
+void spline_widget::setConfig(base_spline* spl)
 {
-    if (spl != _config)
+    if (connection)
     {
-        if (connection)
-        {
-            QObject::disconnect(connection);
-            connection = QMetaObject::Connection();
-        }
+        QObject::disconnect(connection);
+        connection = QMetaObject::Connection();
+    }
 
-        if (spl)
-        {
-            std::shared_ptr<spline::settings> s = spl->get_settings();
-            connection = connect(s.get(), &spline::settings::recomputed,
-                                 this, [this]() { reload_spline(); },
-                                 Qt::QueuedConnection);
-        }
+    _config = spl;
 
-        _config = spl;
-        _background = QPixmap();
+    if (spl)
+    {
         update_range();
+
+        std::shared_ptr<base_spline::base_settings> s = spl->get_settings();
+        connection = connect(s.get(), &spline::base_settings::recomputed,
+                             this, [this]() { reload_spline(); },
+                             Qt::QueuedConnection);
     }
 }
 
@@ -79,13 +76,13 @@ QColor spline_widget::colorBezier() const
 void spline_widget::setColorBezier(QColor color)
 {
     spline_color = color;
-    update();
+    repaint();
 }
 
 void spline_widget::force_redraw()
 {
     _background = QPixmap();
-    update();
+    repaint();
 }
 
 void spline_widget::set_preview_only(bool val)
@@ -104,12 +101,14 @@ void spline_widget::drawBackground()
 
     QPainter painter(&_background);
 
-    painter.fillRect(rect(), palette().color(QPalette::Light));
+    painter.fillRect(rect(), widget_bg_color);
 
-    QColor bg_color(112, 154, 209);
-    if (!isEnabled() && !_preview_only)
-        bg_color = QColor(176,176,180);
-    painter.fillRect(pixel_bounds, bg_color);
+    {
+        QColor bg_color(112, 154, 209);
+        if (!isEnabled() && !_preview_only)
+            bg_color = QColor(176,176,180);
+        painter.fillRect(pixel_bounds, bg_color);
+    }
 
     QFont font;
     font.setPointSize(8);
@@ -182,30 +181,29 @@ void spline_widget::drawFunction()
         }
     }
 
-    const QColor color = progn
-                         (
-                             if (!isEnabled() && !_preview_only)
-                             {
-                                 QColor color(spline_color);
-                                 const int avg = int(float(color.red() + color.green() + color.blue())/3);
-                                 return QColor(int(float(color.red() + avg) * .5f),
-                                               int(float(color.green() + avg) * .5f),
-                                               int(float(color.blue() + avg) * .5f),
-                                               96);
-                             }
-                             else
-                             {
-                                 QColor color(spline_color);
-                                 color.setAlphaF(color.alphaF() * .9);
-                                 return color;
-                             }
-                         );
+    const QColor color_ = progn(
+        if (!isEnabled() && !_preview_only)
+        {
+            QColor color(spline_color);
+            const int avg = int(float(color.red() + color.green() + color.blue())/3);
+            return QColor(int(float(color.red() + avg)*.5f),
+                          int(float(color.green() + avg)*.5f),
+                          int(float(color.blue() + avg)*.5f),
+                          96);
+        }
+        else
+        {
+            QColor color(spline_color);
+            color.setAlphaF(color.alphaF()*.9);
+            return color;
+        }
+    );
 
-    painter.setPen(QPen(color, 1.75, Qt::SolidLine, Qt::FlatCap));
+    painter.setPen(QPen(color_, 1.75, Qt::SolidLine, Qt::FlatCap));
 
 //#define DEBUG_SPLINE
 #ifndef DEBUG_SPLINE
-    static constexpr double step_ = 3./3;
+    constexpr double step_ = 5;
 
     const double maxx = _config->max_input();
     const double step = step_ / c.x();
@@ -214,15 +212,23 @@ void spline_widget::drawFunction()
 
     path.moveTo(point_to_pixel(QPointF(0, 0)));
 
+    const double max_x_pixel = point_to_pixel_(QPointF(maxx, 0)).x();
+
+    auto check = [=](const QPointF& val) {
+        return val.x() < max_x_pixel
+               ? val
+               : QPointF(max_x_pixel, val.y());
+    };
+
     for (double k = 0; k < maxx; k += step*3)
     {
         const float next_1(_config->get_value_no_save(k + step*1));
         const float next_2(_config->get_value_no_save(k + step*2));
         const float next_3(_config->get_value_no_save(k + step*3));
 
-        const QPointF b(point_to_pixel_(QPointF(k + step*1, qreal(next_1)))),
-                      c(point_to_pixel_(QPointF(k + step*2, qreal(next_2)))),
-                      d(point_to_pixel_(QPointF(k + step*3, qreal(next_3))));
+        QPointF b(check(point_to_pixel_(QPointF(k + step*1, qreal(next_1))))),
+                c(check(point_to_pixel_(QPointF(k + step*2, qreal(next_2))))),
+                d(check(point_to_pixel_(QPointF(k + step*3, qreal(next_3)))));
 
         path.cubicTo(b, c, d);
     }
@@ -247,6 +253,14 @@ void spline_widget::drawFunction()
     }
 #endif
 
+    const QRect r1(pixel_bounds.left(), 0, width() - pixel_bounds.left(), pixel_bounds.top()),
+                r2(pixel_bounds.right(), 0, width() - pixel_bounds.right(), pixel_bounds.bottom());
+
+    // prevent topward artifacts the lazy way
+    painter.fillRect(r1, widget_bg_color);
+    // same for rightward artifacts
+    painter.fillRect(r2, widget_bg_color);
+
     const int alpha = !isEnabled() ? 64 : 120;
     if (!_preview_only)
     {
@@ -267,7 +281,15 @@ void spline_widget::paintEvent(QPaintEvent *e)
 
     QPainter p(this);
 
-    if (_background.isNull())
+    if (!_background.isNull())
+    {
+        if (_background.size() != size())
+        {
+            _background = QPixmap();
+            _function = QPixmap();
+        }
+    }
+    else
     {
         _draw_function = true;
         drawBackground();
@@ -319,21 +341,25 @@ void spline_widget::mousePressEvent(QMouseEvent *e)
 
     const int point_pixel_closeness_limit = get_closeness_limit();
 
+    moving_control_point_idx = -1;
+
     points_t points = _config->get_points();
+
     if (e->button() == Qt::LeftButton)
     {
-        bool bTouchingPoint = false;
-        moving_control_point_idx = -1;
+        bool is_touching_point = false;
+
         for (int i = 0; i < points.size(); i++)
         {
             if (point_within_pixel(points[i], e->pos()))
             {
-                bTouchingPoint = true;
-                moving_control_point_idx = int(i);
+                is_touching_point = true;
+                moving_control_point_idx = i;
                 break;
             }
         }
-        if (!bTouchingPoint)
+
+        if (!is_touching_point)
         {
             bool too_close = false;
             const QPoint pos = e->pos();
@@ -355,6 +381,8 @@ void spline_widget::mousePressEvent(QMouseEvent *e)
                 show_tooltip(e->pos());
             }
         }
+
+        _draw_function = true;
     }
 
     if (e->button() == Qt::RightButton)
@@ -374,12 +402,13 @@ void spline_widget::mousePressEvent(QMouseEvent *e)
             if (found_pt != -1)
             {
                 _config->remove_point(found_pt);
+                _draw_function = true;
             }
-            moving_control_point_idx = -1;
         }
     }
-    _draw_function = true;
-    repaint();
+
+    if (_draw_function)
+        repaint();
 }
 
 void spline_widget::mouseMoveEvent(QMouseEvent *e)
@@ -424,11 +453,12 @@ void spline_widget::mouseMoveEvent(QMouseEvent *e)
             new_pt = QPointF(points[i].x(), new_pt.y());
 
         _config->move_point(i, new_pt);
+
         _draw_function = true;
+        repaint();
 
         setCursor(Qt::ClosedHandCursor);
         show_tooltip(pix, new_pt);
-        repaint();
     }
     else if (sz)
     {
@@ -459,6 +489,9 @@ void spline_widget::mouseReleaseEvent(QMouseEvent *e)
         return;
     }
 
+    const bool redraw = moving_control_point_idx != -1;
+    moving_control_point_idx = -1;
+
     if (e->button() == Qt::LeftButton)
     {
         {
@@ -467,14 +500,16 @@ void spline_widget::mouseReleaseEvent(QMouseEvent *e)
             else
                 setCursor(Qt::ArrowCursor);
         }
-        moving_control_point_idx = -1;
-        _draw_function = true;
 
         if (is_in_bounds(e->pos()))
             show_tooltip(e->pos());
         else
             QToolTip::hideText();
+    }
 
+    if (redraw)
+    {
+        _draw_function = true;
         repaint();
     }
 }
@@ -483,11 +518,12 @@ void spline_widget::reload_spline()
 {
     // don't recompute here as the value's about to be recomputed in the callee
     update_range();
+    update();
 }
 
 int spline_widget::get_closeness_limit()
 {
-    return std::fmax(snap_x, 1);
+    return iround(std::fmax(snap_x, 1));
 }
 
 void spline_widget::show_tooltip(const QPoint& pos, const QPointF& value_)
@@ -522,8 +558,8 @@ void spline_widget::show_tooltip(const QPoint& pos, const QPointF& value_)
 
 bool spline_widget::is_in_bounds(const QPoint& pos) const
 {
-    static constexpr int grace = point_size * 3;
-    static constexpr int bottom_grace = int(point_size * 1.5);
+    constexpr int grace = point_size * 3;
+    constexpr int bottom_grace = int(point_size * 1.5);
     return (pos.x() + grace        > pixel_bounds.left() &&
             pos.x() - grace        < pixel_bounds.right() &&
             pos.y() + grace        > pixel_bounds.top() &&
@@ -571,7 +607,7 @@ QPointF spline_widget::pixel_coord_to_point(const QPoint& point)
     qreal x = (point.x() - pixel_bounds.x()) / c.x();
     qreal y = (pixel_bounds.height() - point.y() + pixel_bounds.y()) / c.y();
 
-    static constexpr int c = 1000;
+    constexpr int c = 1000;
 
     if (snap_x > 0)
     {

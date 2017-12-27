@@ -57,34 +57,28 @@ void mouse::pose(const double *headpose)
 
 QString mouse::game_name()
 {
-    return "Mouse tracker";
+    return otr_tr("Mouse tracker");
 }
 
 int mouse::get_delta(int val, int prev)
 {
     using std::abs;
 
-    const int a = abs(val - prev), b = abs(val + prev), c = abs(val);
-    if (c < a && c < b)
-        return val;
-    if (b < a && b < c)
+    const int a = abs(val - prev), b = abs(val + prev);
+    if (b < a)
         return val + prev;
-    return val - prev;
+    else
+        return val - prev;
 }
 
 int mouse::get_value(double val, double sensitivity, bool is_rotation)
 {
-    static constexpr double c = 1e-1;
     static constexpr double sgn[] = { 1e-2, 1 };
+    constexpr double c = 1e-1;
 
     return iround(val * c * sensitivity * sgn[unsigned(is_rotation)]);
 }
 
 mouse::mouse() : last_x(0), last_y(0) {}
-
-bool mouse::correct()
-{
-    return true;
-}
 
 OPENTRACK_DECLARE_PROTOCOL(mouse, MOUSEControls, mouseDll)

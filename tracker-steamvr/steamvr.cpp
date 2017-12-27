@@ -32,7 +32,7 @@
 QMutex device_list::mtx(QMutex::Recursive);
 
 template<typename F>
-static auto with_vr_lock(F&& fun) -> decltype(fun(vr_t(), error_t()))
+auto with_vr_lock(F&& fun) -> decltype(fun(vr_t(), error_t()))
 {
     QMutexLocker l(&device_list::mtx);
     error_t e; vr_t v;
@@ -54,7 +54,7 @@ void device_list::fill_device_specs(QList<device_spec>& list)
             v->GetDeviceToAbsoluteTrackingPose(origin::TrackingUniverseSeated, 0,
                                                device_states, vr::k_unMaxTrackedDeviceCount);
 
-            static constexpr unsigned bufsiz = vr::k_unTrackingStringSize;
+            constexpr unsigned bufsiz = vr::k_unTrackingStringSize;
             static char str[bufsiz+1] {}; // vr_lock prevents reentrancy
 
             for (unsigned k = 0; k < vr::k_unMaxTrackedDeviceCount; k++)
@@ -106,6 +106,7 @@ void device_list::fill_device_specs(QList<device_spec>& list)
                dev.model = str;
                dev.pose = device_states[k];
                dev.k = k;
+               dev.is_connected = device_states[k].bDeviceIsConnected;
 
                list.push_back(dev);
             }
@@ -182,16 +183,16 @@ steamvr::~steamvr()
 {
 }
 
-void steamvr::start_tracker(QFrame*)
+module_status steamvr::start_tracker(QFrame*)
 {
-    with_vr_lock([this](vr_t v, error_t e)
+    return with_vr_lock([this](vr_t v, error_t e)
     {
+        QString err;
+
         if (!v)
         {
-            QMessageBox::warning(nullptr,
-                                 tr("SteamVR init error"), device_list::strerror(e),
-                                 QMessageBox::Close, QMessageBox::NoButton);
-            return;
+            err = device_list::strerror(e);
+            return error(err);
         }
 
         const QString serial = s.device_serial().toString();
@@ -200,13 +201,7 @@ void steamvr::start_tracker(QFrame*)
         const int sz = specs.count();
 
         if (sz == 0)
-        {
-            QMessageBox::warning(nullptr,
-                                 tr("SteamVR init error"),
-                                 tr("No HMD connected"),
-                                 QMessageBox::Close, QMessageBox::NoButton);
-            return;
-        }
+            err = tr("No HMD connected");
 
         device_index = -1;
 
@@ -219,13 +214,13 @@ void steamvr::start_tracker(QFrame*)
             }
         }
 
-        if (device_index == -1)
-        {
-            QMessageBox::warning(nullptr,
-                                 tr("SteamVR init error"),
-                                 tr("Can't find device with that serial"),
-                                 QMessageBox::Close, QMessageBox::NoButton);
-        }
+        if (device_index == -1 && err.isEmpty())
+            err = tr("Can't find device with that serial");
+
+        if (err.isEmpty())
+            return status_ok();
+        else
+            return error(err);
     });
 }
 
@@ -237,7 +232,7 @@ void steamvr::data(double* data)
         std::tie(ok, pose) = device_list::get_pose(device_index);
         if (ok)
         {
-            static constexpr int c = 10;
+            constexpr int c = 10;
 
             const auto& result = pose.mDeviceToAbsoluteTracking;
 
@@ -247,7 +242,7 @@ void steamvr::data(double* data)
 
             matrix_to_euler(data[Yaw], data[Pitch], data[Roll], result);
 
-            static constexpr double r2d = 180 / M_PI;
+            constexpr double r2d = 180 / M_PI;
             data[Yaw] *= r2d; data[Pitch] *= r2d; data[Roll] *= r2d;
         }
     }
@@ -266,7 +261,6 @@ bool steamvr::center()
 
                 // Use chaperone universe real world up instead of opentrack's initial pose centering
                 // Note: Controllers will be centered based on initial headset position.
-                // TODO: may want to center controller/tracker yaw and position (only) when used alone
                 return true;
             }
             else
@@ -281,14 +275,13 @@ void steamvr::matrix_to_euler(double& yaw, double& pitch, double& roll, const vr
 {
     using std::atan2;
     using std::sqrt;
+    using std::asin;
 
     using d = double;
 
-    yaw = atan2(d(-result.m[2][0]), sqrt(d(result.m[2][1]) * d(result.m[2][1]) + d(result.m[2][2]) * d(result.m[2][2])));
-    pitch = atan2(d(result.m[2][1]), d(result.m[2][2]));
-    roll = atan2(d(result.m[1][0]), d(result.m[0][0]));
-
-    // TODO: gimbal lock avoidance?
+    yaw = atan2(d(result.m[2][0]), d(result.m[0][0]));
+    pitch = atan2(-d(result.m[1][2]), d(result.m[1][1]));
+    roll = asin(d(result.m[1][0]));
 }
 
 steamvr_dialog::steamvr_dialog()
@@ -303,7 +296,12 @@ steamvr_dialog::steamvr_dialog()
 
     device_list list;
     for (const device_spec& spec : list.devices())
-        ui.device->addItem(spec.to_string(), spec.to_string());
+    {
+        QString text = spec.to_string();
+        if (!spec.is_connected)
+            text = QStringLiteral("%1 [disconnected]").arg(text);
+        ui.device->addItem(text, spec.to_string());
+    }
 
     tie_setting(s.device_serial, ui.device);
 }

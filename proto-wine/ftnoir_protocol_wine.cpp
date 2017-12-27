@@ -9,6 +9,7 @@
 #include <sys/stat.h>        /* For mode constants */
 #include <fcntl.h>           /* For O_* constants */
 #include "csv/csv.h"
+#include "compat/macros.hpp"
 
 wine::wine() : lck_shm(WINE_SHM_NAME, WINE_MTX_NAME, sizeof(WineSHM)), shm(NULL), gameid(0)
 {
@@ -27,7 +28,6 @@ wine::~wine()
         shm->stop = true;
         wrapper.waitForFinished(100);
     }
-    wrapper.kill();
     wrapper.close();
     shm_unlink(WINE_SHM_NAME);
 }
@@ -55,9 +55,12 @@ void wine::pose( const double *headpose )
     }
 }
 
-bool wine::correct()
+module_status wine::initialize()
 {
-    return lck_shm.success();
+    if (lck_shm.success())
+        return status_ok();
+    else
+        return error(otr_tr("Can't open shared memory mapping"));
 }
 
 OPENTRACK_DECLARE_PROTOCOL(wine, FTControls, wineDll)

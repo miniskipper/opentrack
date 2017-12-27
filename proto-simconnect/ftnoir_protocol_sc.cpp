@@ -12,20 +12,21 @@
 #include "ftnoir_protocol_sc.h"
 #include "api/plugin-api.hpp"
 #include "opentrack-library-path.h"
+#include "compat/timer.hpp"
 
-simconnect::simconnect() : should_stop(false), hSimConnect(nullptr)
+simconnect::simconnect() : hSimConnect(nullptr), should_reconnect(false)
 {
 }
 
 simconnect::~simconnect()
 {
-    should_stop = true;
+    requestInterruption();
     wait();
 }
 
 void simconnect::run()
 {
-    HANDLE event = CreateEvent(NULL, FALSE, FALSE, nullptr);
+    HANDLE event = CreateEventA(NULL, FALSE, FALSE, nullptr);
 
     if (event == nullptr)
     {
@@ -33,32 +34,66 @@ void simconnect::run()
         return;
     }
 
-    while (!should_stop)
+    while (!isInterruptionRequested())
     {
-        if (SUCCEEDED(simconnect_open(&hSimConnect, "opentrack", NULL, 0, event, 0)))
-        {
-            simconnect_subscribetosystemevent(hSimConnect, 0, "Frame");
+        HRESULT hr;
 
-            while (!should_stop)
+        if (SUCCEEDED(hr = simconnect_open(&hSimConnect, "opentrack", nullptr, 0, event, 0)))
+        {
+            if (!SUCCEEDED(hr = simconnect_subscribetosystemevent(hSimConnect, 0, "Frame")))
             {
-                if (WaitForSingleObject(event, 10) == WAIT_OBJECT_0)
-                {
-                    if (FAILED(simconnect_calldispatch(hSimConnect, processNextSimconnectEvent, reinterpret_cast<void*>(this))))
-                        break;
-                }
+                qDebug() << "simconnect: can't subscribe to frame event:" << hr;
             }
+
+            Timer tm;
+            should_reconnect = false;
+
+            if (SUCCEEDED(hr))
+                while (!isInterruptionRequested())
+                {
+                    if (should_reconnect)
+                        break;
+
+                    if (WaitForSingleObject(event, 100) == WAIT_OBJECT_0)
+                    {
+                        tm.start();
+
+                        if (!SUCCEEDED(hr = simconnect_calldispatch(hSimConnect, processNextSimconnectEvent, reinterpret_cast<void*>(this))))
+                        {
+                            qDebug() << "simconnect: calldispatch failed:" << hr;
+                            break;
+                        }
+                    }
+                    else
+                    {
+                        const int idle_seconds = tm.elapsed_seconds();
+
+                        constexpr int max_idle_seconds = 2;
+
+                        if (idle_seconds >= max_idle_seconds)
+                        {
+                            qDebug() << "simconnect: reconnect";
+                            break;
+                        }
+                    }
+                }
 
             (void) simconnect_close(hSimConnect);
         }
+        else
+            qDebug() << "simconnect: can't open handle:" << hr;
 
-        if (!should_stop)
-            Sleep(100);
+        if (!isInterruptionRequested())
+            Sleep(3000);
     }
+
+    qDebug() << "simconnect: exit";
 
     CloseHandle(event);
 }
 
-void simconnect::pose( const double *headpose ) {
+void simconnect::pose( const double *headpose )
+{
     // euler degrees
     virtSCRotX = float(-headpose[Pitch]);
     virtSCRotY = float(headpose[Yaw]);
@@ -74,13 +109,16 @@ void simconnect::pose( const double *headpose ) {
 #   pragma GCC diagnostic ignored "-Wmissing-field-initializers"
 #endif
 
-class ActivationContext {
+class ActivationContext
+{
 public:
-    ActivationContext(const int resid) : ok(false) {
+    ActivationContext(const int resid) :
+        ok(false)
+    {
         hactctx = INVALID_HANDLE_VALUE;
         actctx_cookie = 0;
-        ACTCTXA actx = {0};
-        actx.cbSize = sizeof(ACTCTXA);
+        ACTCTXA actx = {};
+        actx.cbSize = sizeof(actx);
         actx.lpResourceName = MAKEINTRESOURCEA(resid);
         actx.dwFlags = ACTCTX_FLAG_RESOURCE_NAME_VALID;
 #ifdef _MSC_VER
@@ -94,16 +132,18 @@ public:
         actx.lpSource = name.constData();
         hactctx = CreateActCtxA(&actx);
         actctx_cookie = 0;
-        if (hactctx != INVALID_HANDLE_VALUE) {
-            if (!ActivateActCtx(hactctx, &actctx_cookie)) {
-                qDebug() << "SC: can't set win32 activation context" << GetLastError();
+        if (hactctx != INVALID_HANDLE_VALUE)
+        {
+            if (!ActivateActCtx(hactctx, &actctx_cookie))
+            {
+                qDebug() << "simconnect: can't set win32 activation context" << GetLastError();
                 ReleaseActCtx(hactctx);
                 hactctx = INVALID_HANDLE_VALUE;
             }
             else
                 ok = true;
         } else {
-            qDebug() << "SC: can't create win32 activation context" << GetLastError();
+            qDebug() << "simconnect: can't create win32 activation context" << GetLastError();
         }
     }
     ~ActivationContext() {
@@ -113,14 +153,15 @@ public:
             ReleaseActCtx(hactctx);
         }
     }
-    bool is_ok() { return ok; }
+    bool is_ok() const { return ok; }
+
 private:
     ULONG_PTR actctx_cookie;
     HANDLE hactctx;
     bool ok;
 };
 
-bool simconnect::correct()
+module_status simconnect::initialize()
 {
     if (!SCClientLib.isLoaded())
     {
@@ -129,46 +170,39 @@ bool simconnect::correct()
         if (ctx.is_ok())
         {
             SCClientLib.setFileName("SimConnect.dll");
-            if (!SCClientLib.load()) {
-                qDebug() << "SC load" << SCClientLib.errorString();
-                return false;
-            }
+            if (!SCClientLib.load())
+                return error(tr("dll load failed -- %1").arg(SCClientLib.errorString()));
         }
         else
-            return false;
+            return error("can't load SDK -- check selected simconnect version");
     }
 
     simconnect_open = (importSimConnect_Open) SCClientLib.resolve("SimConnect_Open");
     if (simconnect_open == NULL) {
-        qDebug() << "simconnect::correct() says: SimConnect_Open function not found in DLL!";
-        return false;
+        return error("simconnect: SimConnect_Open function not found in DLL!");
     }
     simconnect_set6DOF = (importSimConnect_CameraSetRelative6DOF) SCClientLib.resolve("SimConnect_CameraSetRelative6DOF");
     if (simconnect_set6DOF == NULL) {
-        qDebug() << "simconnect::correct() says: SimConnect_CameraSetRelative6DOF function not found in DLL!";
-        return false;
+        return error("simconnect: SimConnect_CameraSetRelative6DOF function not found in DLL!");
     }
     simconnect_close = (importSimConnect_Close) SCClientLib.resolve("SimConnect_Close");
     if (simconnect_close == NULL) {
-        qDebug() << "simconnect::correct() says: SimConnect_Close function not found in DLL!";
-        return false;
+        return error("simconnect: SimConnect_Close function not found in DLL!");
     }
 
     simconnect_calldispatch = (importSimConnect_CallDispatch) SCClientLib.resolve("SimConnect_CallDispatch");
     if (simconnect_calldispatch == NULL) {
-        qDebug() << "simconnect::correct() says: SimConnect_CallDispatch function not found in DLL!";
-        return false;
+        return error("simconnect: SimConnect_CallDispatch function not found in DLL!");
     }
 
     simconnect_subscribetosystemevent = (importSimConnect_SubscribeToSystemEvent) SCClientLib.resolve("SimConnect_SubscribeToSystemEvent");
     if (simconnect_subscribetosystemevent == NULL) {
-        qDebug() << "simconnect::correct() says: SimConnect_SubscribeToSystemEvent function not found in DLL!";
-        return false;
+        return error("simconnect: SimConnect_SubscribeToSystemEvent function not found in DLL!");
     }
 
     start();
 
-    return true;
+    return status_ok();
 }
 
 void simconnect::handle()
@@ -183,6 +217,14 @@ void CALLBACK simconnect::processNextSimconnectEvent(SIMCONNECT_RECV* pData, DWO
     switch(pData->dwID)
     {
     default:
+        break;
+    case SIMCONNECT_RECV_ID_EXCEPTION:
+        qDebug() << "simconnect: got exception";
+        //self.should_reconnect = true;
+        break;
+    case SIMCONNECT_RECV_ID_QUIT:
+        qDebug() << "simconnect: got quit event";
+        self.should_reconnect = true;
         break;
     case SIMCONNECT_RECV_ID_EVENT_FRAME:
         self.handle();

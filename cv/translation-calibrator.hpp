@@ -29,11 +29,10 @@ public:
     void update(const cv::Matx33d& R_CM_k, const cv::Vec3d& t_CM_k);
 
     // get the current estimate for t_MH
-    std::tuple<cv::Vec3f, unsigned> get_estimate();
+    std::tuple<cv::Vec3f, cv::Vec3i> get_estimate();
 
 private:
     bool check_bucket(const cv::Matx33d& R_CM_k);
-    static int get_index(int yaw, int pitch, int roll);
 
     cv::Matx66f P;  // normalized precision matrix = inverse covariance
     cv::Vec6f y;    // P*(-t_MH, t_CH)

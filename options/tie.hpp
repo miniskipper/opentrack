@@ -22,10 +22,15 @@
 
 #include <cmath>
 
+#if defined __GNUG__
+#   pragma GCC diagnostic push
+#   pragma GCC diagnostic ignored "-Wattributes"
+#endif
+
 namespace options {
 
 template<typename t>
-typename std::enable_if<std::is_enum<t>::value>::type
+std::enable_if_t<std::is_enum<t>::value>
 tie_setting(value<t>& v, QComboBox* cb)
 {
     cb->setCurrentIndex(cb->findData(int(static_cast<t>(v))));
@@ -42,37 +47,35 @@ tie_setting(value<t>& v, QComboBox* cb)
                                                });
                         },
                         v.DIRECT_CONNTYPE);
-    base_value::connect(&v, static_cast<void (base_value::*)(int) const>(&base_value::valueChanged),
-                        cb, [cb](int x) { cb->setCurrentIndex(cb->findData(x)); },
-                        v.SAFE_CONNTYPE);
+    base_value::connect(&v, base_value::value_changed<int>(),
+                        cb, [cb](int x) {
+                            run_in_thread_sync(cb, [&]() { cb->setCurrentIndex(cb->findData(x)); });
+                        },
+                        v.DIRECT_CONNTYPE);
 }
 
-template<typename t, typename... xs>
-void tie_setting(value<t>& v, QLabel* lb, const QString& format, const xs&... args)
+template<typename t, typename F>
+void tie_setting(value<t>& v, QLabel* lb, F&& fun)
 {
-    auto closure = [=](const t& x) { lb->setText(format.arg(x, args...)); };
+    auto closure = [=](cv_qualified<t> x) { lb->setText(fun(x)); };
 
     closure(v());
-    base_value::connect(&v, static_cast<void(base_value::*)(const t&) const>(&base_value::valueChanged),
+    base_value::connect(&v, base_value::value_changed<t>(),
                         lb, closure,
                         v.SAFE_CONNTYPE);
 }
 
-// Clang 3.9 has a bug
-// error: missing default argument on parameter 'args'
-
-// cf. http://stackoverflow.com/questions/29098835/can-parameter-pack-function-arguments-be-defaulted
-
-template<typename t, typename F, typename... xs>
-decltype((void)((std::declval<F>())(std::declval<const t&>())))
-tie_setting(value<t>& v, QLabel* lb, F&& fun, const QString& fmt, const xs&... args)
+template<typename t, typename F>
+void tie_setting(value<t>& v, QObject* obj, F&& fun)
 {
-    auto closure = [=](const t& x) { lb->setText(fmt.arg(fun(x), args...)); };
+    if (obj == nullptr)
+        abort();
 
-    closure(v());
-    base_value::connect(&v, static_cast<void(base_value::*)(const t&) const>(&base_value::valueChanged),
-                        lb, closure,
-                        v.SAFE_CONNTYPE);
+    fun(v());
+
+    base_value::connect(&v, base_value::value_changed<t>(),
+                        obj, fun,
+                        v.DIRECT_CONNTYPE);
 }
 
 OTR_OPTIONS_EXPORT void tie_setting(value<int>& v, QComboBox* cb);
@@ -81,10 +84,13 @@ OTR_OPTIONS_EXPORT void tie_setting(value<QVariant>& v, QComboBox* cb);
 OTR_OPTIONS_EXPORT void tie_setting(value<bool>& v, QCheckBox* cb);
 OTR_OPTIONS_EXPORT void tie_setting(value<double>& v, QDoubleSpinBox* dsb);
 OTR_OPTIONS_EXPORT void tie_setting(value<int>& v, QSpinBox* sb);
-OTR_OPTIONS_EXPORT void tie_setting(value<int>& v, QSlider* sl);
 OTR_OPTIONS_EXPORT void tie_setting(value<QString>& v, QLineEdit* le);
 OTR_OPTIONS_EXPORT void tie_setting(value<QString>& v, QLabel* lb);
 OTR_OPTIONS_EXPORT void tie_setting(value<int>& v, QTabWidget* t);
 OTR_OPTIONS_EXPORT void tie_setting(value<slider_value>& v, QSlider* w);
 
 } // ns options
+
+#if defined __GNUG__
+#   pragma GCC diagnostic pop
+#endif

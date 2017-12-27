@@ -44,7 +44,7 @@ void RSTracker::configurePreviewFrame()
     mImageWidget->show();
 }
 
-void RSTracker::start_tracker(QFrame* previewFrame)
+module_status RSTracker::start_tracker(QFrame* previewFrame)
 {
         qDebug() << "tracker_rs: starting tracker";
 
@@ -55,6 +55,8 @@ void RSTracker::start_tracker(QFrame* previewFrame)
     startPreview();
 
     mTrackerWorkerThread.start(QThread::HighPriority);
+
+    return status_ok();
 }
 
 void RSTracker::startPreview(){
@@ -145,7 +147,7 @@ RSTracker::~RSTracker() {
 }
 
 QString RSTrackerMetaData::name() {
-    return QString(QCoreApplication::translate("RSTrackerMetaData", "Intel® RealSense™ Technology"));
+    return otr_tr("Intel® RealSense™ Technology");
 }
 
 QIcon RSTrackerMetaData::icon() {

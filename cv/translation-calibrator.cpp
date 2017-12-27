@@ -54,11 +54,9 @@ void TranslationCalibrator::update(const cv::Matx33d& R_CM_k, const cv::Vec3d& t
     y += H_k_T * t_CM_k;
 }
 
-std::tuple<cv::Vec3f, unsigned> TranslationCalibrator::get_estimate()
+std::tuple<cv::Vec3f, cv::Vec3i> TranslationCalibrator::get_estimate()
 {
     cv::Vec6f x = P.inv() * y;
-
-    qDebug() << "calibrator:" << nsamples << "samples total";
 
     unsigned values[3] {};
     vec* in[] { &used_yaw_poses, &used_pitch_poses, &used_roll_poses };
@@ -71,18 +69,19 @@ std::tuple<cv::Vec3f, unsigned> TranslationCalibrator::get_estimate()
                 values[k]++;
     }
 
-    qDebug() << "samples"
+    qDebug() << "samples total" << nsamples
              << "yaw" << values[0]
              << "pitch" << values[1]
              << "roll" << values[2];
 
-    return std::make_tuple(cv::Vec3f(-x[0], -x[1], -x[2]), nsamples);
+    return std::make_tuple(cv::Vec3f(-x[0], -x[1], -x[2]),
+                           cv::Vec3i(values[0], values[1], values[2]));
 }
 
 bool TranslationCalibrator::check_bucket(const cv::Matx33d& R_CM_k)
 {
     using namespace euler;
-    static constexpr double r2d = 180/M_PI;
+    constexpr double r2d = 180/M_PI;
 
     rmat r;
     for (unsigned j = 0; j < 3; j++)
@@ -98,7 +97,6 @@ bool TranslationCalibrator::check_bucket(const cv::Matx33d& R_CM_k)
     if (yaw_k < used_yaw_poses.size() &&
         pitch_k < used_pitch_poses.size() &&
         roll_k < used_roll_poses.size())
-
     {
         used_yaw_poses[yaw_k]++;
         used_pitch_poses[pitch_k]++;

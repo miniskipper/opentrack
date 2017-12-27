@@ -8,6 +8,7 @@
 
 #include "test.h"
 #include "api/plugin-api.hpp"
+#include "compat/math-imports.hpp"
 
 #include <QPushButton>
 
@@ -29,9 +30,11 @@ test_tracker::~test_tracker()
 {
 }
 
-void test_tracker::start_tracker(QFrame*)
+module_status test_tracker::start_tracker(QFrame*)
 {
     t.start();
+
+    return status_ok();
 }
 
 #ifdef EMIT_NAN
@@ -40,11 +43,6 @@ void test_tracker::start_tracker(QFrame*)
 
 void test_tracker::data(double *data)
 {
-    using std::fmod;
-    using std::sin;
-    using std::fabs;
-    using std::copysign;
-
     const double dt = t.elapsed_seconds();
     t.start();
 
@@ -81,7 +79,10 @@ test_dialog::test_dialog()
 {
     ui.setupUi(this);
 
-    connect(ui.buttonBox->button(QDialogButtonBox::Abort), &QPushButton::clicked, []() { *(volatile int*)0 = 0; });
+    connect(ui.buttonBox, &QDialogButtonBox::clicked, [this](QAbstractButton* btn) {
+        if (btn == ui.buttonBox->button(QDialogButtonBox::Abort))
+            *(volatile int*)0 = 0;
+    });
 
     connect(ui.buttonBox, SIGNAL(accepted()), this, SLOT(doOK()));
     connect(ui.buttonBox, SIGNAL(rejected()), this, SLOT(doCancel()));

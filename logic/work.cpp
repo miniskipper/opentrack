@@ -5,7 +5,6 @@
 #include <QMessageBox>
 #include <QFileDialog>
 
-
 QString Work::browse_datalogging_file(main_settings &s)
 {
     QString filename = s.tracklogging_filename;
@@ -17,9 +16,9 @@ QString Work::browse_datalogging_file(main_settings &s)
        Since the freeze is apparently random, I'm not sure it helped.
     */
     QString newfilename = QFileDialog::getSaveFileName(nullptr,
-                                                       QCoreApplication::translate("Work", "Select filename"),
+                                                       otr_tr("Select filename"),
                                                        filename,
-                                                       QCoreApplication::translate("Work", "CSV File (*.csv)"),
+                                                       otr_tr("CSV File (*.csv)"),
                                                        nullptr);
     if (!newfilename.isEmpty())
     {
@@ -45,10 +44,10 @@ std::shared_ptr<TrackLogger> Work::make_logger(main_settings &s)
             if (!logger->is_open())
             {
                 logger = nullptr;
-                QMessageBox::warning(nullptr, QCoreApplication::translate("Work", "Logging error"),
-                    QCoreApplication::translate("Work", "Unable to open file '%1'. Proceeding without logging.").arg(s.tracklogging_filename),
-                    QMessageBox::Ok,
-                    QMessageBox::NoButton);
+                QMessageBox::warning(nullptr,
+                    otr_tr("Logging error"),
+                    otr_tr("Unable to open file '%1'. Proceeding without logging.").arg(s.tracklogging_filename),
+                    QMessageBox::Ok, QMessageBox::NoButton);
             }
             else
             {
@@ -60,10 +59,10 @@ std::shared_ptr<TrackLogger> Work::make_logger(main_settings &s)
 }
 
 
-Work::Work(Mappings& m, QFrame* frame, std::shared_ptr<dylib> tracker_, std::shared_ptr<dylib> filter_, std::shared_ptr<dylib> proto_) :
+Work::Work(Mappings& m, event_handler& ev,  QFrame* frame, std::shared_ptr<dylib> tracker_, std::shared_ptr<dylib> filter_, std::shared_ptr<dylib> proto_) :
     libs(frame, tracker_, filter_, proto_),
     logger(make_logger(s)),
-    tracker(std::make_shared<Tracker>(m, libs, *logger)),
+    tracker(std::make_shared<pipeline>(m, libs, ev, *logger)),
     sc(std::make_shared<Shortcuts>()),
     keys {
         key_tuple(s.key_center1, [&](bool) -> void { tracker->center(); }, true),
@@ -103,5 +102,5 @@ Work::~Work()
     // order matters, otherwise use-after-free -sh
     sc = nullptr;
     tracker = nullptr;
-    libs = SelectedLibraries();
+    libs = runtime_libraries();
 }

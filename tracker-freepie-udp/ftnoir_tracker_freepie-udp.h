@@ -33,7 +33,7 @@ class tracker_freepie : public ITracker, private QThread
 public:
     tracker_freepie();
     ~tracker_freepie() override;
-    void start_tracker(QFrame *) override;
+    module_status start_tracker(QFrame *) override;
     void data(double *data) override;
 protected:
     void run() override;
@@ -42,7 +42,6 @@ private:
     QUdpSocket sock;
     settings s;
     QMutex mtx;
-    volatile bool should_quit;
 };
 
 class dialog_freepie : public ITrackerDialog
@@ -63,7 +62,7 @@ private slots:
 class meta_freepie : public Metadata
 {
 public:
-    QString name() { return QString(QCoreApplication::translate("meta_freepie", "FreePIE UDP receiver")); }
+    QString name() { return otr_tr("FreePIE UDP receiver"); }
     QIcon icon() { return QIcon(":/glovepie.png"); }
 };
 

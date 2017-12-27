@@ -21,10 +21,10 @@ hatire::hatire()
         HAT.Trans[1]=0;
         HAT.Trans[2]=0;
 
-        Begin.append((char) 0xAA);
-        Begin.append((char) 0xAA);
-        End.append((char) 0x55);
-        End.append((char) 0x55);
+        Begin.append((unsigned char) 0xAA);
+        Begin.append((unsigned char) 0xAA);
+        End.append((unsigned char) 0x55);
+        End.append((unsigned char) 0x55);
 }
 
 hatire::~hatire()
@@ -43,27 +43,27 @@ void hatire::get_info( int *tps )
         *tps=frame_cnt;
         frame_cnt=0;
 }
-void hatire::start_tracker(QFrame*)
+module_status hatire::start_tracker(QFrame*)
 {
-        CptError=0;
-        frame_cnt=0;
+    CptError=0;
+    frame_cnt=0;
     t.Log("Starting Tracker");
 
     serial_result ret = t.init_serial_port();
 
+    t.start();
+
     switch (ret.code)
     {
     case result_ok:
-        break;
+        return status_ok();
     case result_error:
-        QMessageBox::warning(0, tr("Error"), ret.error, QMessageBox::Ok,QMessageBox::NoButton);
-        break;
+        return error(ret.error);
     case result_open_error:
-        QMessageBox::warning(0, tr("Error"), tr("Unable to open ComPort: %1").arg(ret.error), QMessageBox::Ok,QMessageBox::NoButton);
-        break;
+        return error(tr("Unable to open ComPort: %1").arg(ret.error));
+    default:
+        return error("Unknown error");
     }
-
-    t.start();
 }
 
 void hatire::serial_info()
@@ -106,44 +106,27 @@ void hatire::data(double *data)
 
                 if (ArduinoData.Code <= 1000)
                     HAT = ArduinoData;
-                else
-                    emit t.serial_debug_info(data_read.mid(4,24))  ;
+
                 data_read.remove(0, 30);
             }
             else
             {
+                CptError++;
                 // resync frame
-                int index =	data_read.indexOf(Begin, 1);
+                const int index = data_read.indexOf(Begin, 1);
                 if (index == -1)
-                {
-                    index = data_read.length();
-                }
-
-                if (data_read.length() != 0)
-                {
-                    emit t.serial_debug_info(data_read.mid(0,index));
-
+                    data_read.clear();
+                else
                     data_read.remove(0, index);
-
-                    CptError++;
-
-                    qDebug() << QTime::currentTime() << "hatire resync stream" << "index" << index << "remaining" << data_read.size();
-                }
             }
         }
     }
 
     if (CptError > 50)
     {
-        emit t.serial_debug_info("Can't find HAT frame");
-                CptError=0;
-        }
-
-        // Need to handle this differently in opentrack as opposed to tracknoir
-    //if  (new_frame) {
-        // in open track always populate the data, it seems opentrack always gives us a zeroed data structure to populate with pose data.
-        // if we have no new data, we don't populate it and so 0 pose gets handed back which is wrong. By always running the code below, if we
-        // have no new data, we will just give it the previous pose data which is the best thing we can do really.
+        qDebug() << "Can't find HAT frame";
+        CptError=0;
+    }
 
     const struct
     {
@@ -161,15 +144,11 @@ void hatire::data(double *data)
         { s.EnableRoll, s.InvertRoll, HAT.Rot[s.RollAxis], data[Roll] },
     };
 
-    for (unsigned i = 0; i < sizeof(spec) / sizeof(*spec); i++)
+    for (unsigned i = 0; i < std::size(spec); i++)
     {
         auto& k = spec[i];
         k.place = (k.sign ? -1.f : 1.f) * (k.enable ? k.input : 0.f);
     }
-
-    // For debug
-    //data->x=dataRead.length();
-    //data->y=CptError;
 }
 
 #include "ftnoir_tracker_hat_dialog.h"

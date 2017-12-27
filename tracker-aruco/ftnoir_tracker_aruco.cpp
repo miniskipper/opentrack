@@ -10,6 +10,11 @@
 #include "cv/video-property-page.hpp"
 #include "compat/camera-names.hpp"
 #include "compat/sleep.hpp"
+#include "compat/math-imports.hpp"
+
+#ifdef _MSC_VER
+#   pragma warning(disable : 4702)
+#endif
 
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
@@ -52,32 +57,34 @@ aruco_tracker::aruco_tracker() :
     roi_points(4),
     last_roi(65535, 65535, 0, 0),
     adaptive_size_pos(0),
-    stop(false),
     use_otsu(false)
 {
+    cv::setBreakOnError(true);
     // param 2 ignored for Otsu thresholding. it's required to use our fork of Aruco.
     set_detector_params();
 }
 
 aruco_tracker::~aruco_tracker()
 {
-    stop = true;
+    requestInterruption();
     wait();
     // fast start/stop causes breakage
     portable::sleep(1000);
     camera.release();
 }
 
-void aruco_tracker::start_tracker(QFrame* videoframe)
+module_status aruco_tracker::start_tracker(QFrame* videoframe)
 {
     videoframe->show();
-    videoWidget = qptr<cv_video_widget>(videoframe);
-    layout = qptr<QHBoxLayout>();
+    videoWidget = std::make_unique<cv_video_widget>(videoframe);
+    layout = std::make_unique<QHBoxLayout>();
     layout->setContentsMargins(0, 0, 0, 0);
-    layout->addWidget(videoWidget.data());
-    videoframe->setLayout(layout.data());
+    layout->addWidget(videoWidget.get());
+    videoframe->setLayout(layout.get());
     videoWidget->show();
     start();
+
+    return status_ok();
 }
 
 void aruco_tracker::getRT(cv::Matx33d& r_, cv::Vec3d& t_)
@@ -224,10 +231,7 @@ cv::Point3f aruco_tracker::rotate_model(float x, float y, settings::rot mode)
 
     if (mode)
     {
-        using std::cos;
-        using std::sin;
-
-        const float theta = int(mode) * 90/4. * M_PI/180;
+        const double theta = int(mode) * 90/4. * M_PI/180;
         pt.x = x * cos(theta) - y * sin(theta);
         pt.y = y * cos(theta) + x * sin(theta);
     }
@@ -239,7 +243,7 @@ void aruco_tracker::set_points()
     using f = float;
     const f hx = f(s.headpos_x), hy = f(s.headpos_y), hz = f(s.headpos_z);
 
-    static constexpr float size = 40;
+    constexpr float size = 40;
 
     const int x1=1, x2=2, x3=3, x4=0;
 
@@ -328,39 +332,42 @@ void aruco_tracker::set_detector_params()
 {
     detector.setDesiredSpeed(3);
     detector.setThresholdParams(adaptive_sizes[adaptive_size_pos], adaptive_thres);
+#if !defined USE_EXPERIMENTAL_CANNY
     if (use_otsu)
         detector._thresMethod = aruco::MarkerDetector::FIXED_THRES;
     else
         detector._thresMethod = aruco::MarkerDetector::ADPT_THRES;
+#else
+        detector._thresMethod = aruco::MarkerDetector::CANNY;
+#endif
 }
 
 void aruco_tracker::cycle_detection_params()
 {
+#if !defined USE_EXPERIMENTAL_CANNY
     if (!use_otsu)
         use_otsu = true;
     else
+#endif
     {
         use_otsu = false;
 
         adaptive_size_pos++;
-        adaptive_size_pos %= sizeof(adaptive_sizes)/sizeof(*adaptive_sizes);
+        adaptive_size_pos %= std::size(adaptive_sizes);
     }
 
     set_detector_params();
 
     qDebug() << "aruco: switched thresholding params"
+#if !defined USE_EXPERIMENTAL_CANNY
              << "otsu:" << use_otsu
+#endif
              << "size:" << adaptive_sizes[adaptive_size_pos];
 }
 
 void aruco_tracker::run()
 {
-    cv::setNumThreads(0);
-
-    using std::fabs;
-    using std::atan;
-    using std::tan;
-    using std::sqrt;
+    cv::setNumThreads(1);
 
     if (!open_camera())
         return;
@@ -368,7 +375,7 @@ void aruco_tracker::run()
     fps_timer.start();
     last_detection_timer.start();
 
-    while (!stop)
+    while (!isInterruptionRequested())
     {
         {
             QMutexLocker l(&camera_mtx);
@@ -377,11 +384,11 @@ void aruco_tracker::run()
                 continue;
         }
 
-        cv::cvtColor(color, grayscale, cv::COLOR_RGB2GRAY);
+        cv::cvtColor(color, grayscale, cv::COLOR_BGR2GRAY);
 
 #ifdef DEBUG_UNSHARP_MASKING
         {
-            static constexpr double strength = double(DEBUG_UNSHARP_MASKING);
+            constexpr double strength = double(DEBUG_UNSHARP_MASKING);
             cv::GaussianBlur(grayscale, blurred, cv::Size(0, 0), gauss_kernel_size);
             cv::addWeighted(grayscale, 1 + strength, blurred, -strength, 0, grayscale);
             cv::imshow("capture", grayscale);

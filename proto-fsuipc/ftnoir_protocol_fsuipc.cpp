@@ -51,7 +51,7 @@ int fsuipc::scale2AnalogLimits(t x, t min_x, t max_x)
 template<typename t>
 static inline bool check_float_fresh(t x, t y)
 {
-    static constexpr t eps = t(1e-4);
+    constexpr t eps = t(1e-4);
     return std::fabs(x - y) >= eps;
 }
 
@@ -144,23 +144,14 @@ void fsuipc::pose(const double *headpose ) {
     prevRotZ = virtRotZ;
 }
 
-bool fsuipc::correct()
+module_status fsuipc::initialize()
 {
-    qDebug() << "correct says: Starting Function";
-
-    //
-    // Load the DLL.
-    //
     FSUIPCLib.setFileName( s.LocationOfDLL );
-    if (FSUIPCLib.load() != true) {
-        qDebug() << "correct says: Error loading FSUIPC DLL";
-        return false;
-    }
-    else {
-        qDebug() << "correct says: FSUIPC DLL loaded.";
-    }
 
-    return true;
+    if (FSUIPCLib.load() != true)
+        return error(otr_tr("Can't load fsuipc at '%1'").arg(s.LocationOfDLL));
+    else
+        return status_ok();
 }
 
 OPENTRACK_DECLARE_PROTOCOL(fsuipc, FSUIPCControls, fsuipcDll)

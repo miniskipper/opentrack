@@ -5,13 +5,13 @@
 #include "ftnoir_tracker_hat_settings.h"
 #include "ftnoir_arduino_type.h"
 
+#include <atomic>
+
 #include <QObject>
-#include <QPalette>
-#include <QtGui>
 #include <QByteArray>
 #include <QMessageBox>
-#include <QtSerialPort/QSerialPort>
-#include <QtSerialPort/QSerialPortInfo>
+#include <QSerialPort>
+#include <QSerialPortInfo>
 #include <QSettings>
 
 class hatire : public QObject, public ITracker
@@ -22,7 +22,7 @@ public:
     hatire();
     ~hatire();
 
-    void start_tracker(QFrame*);
+    module_status start_tracker(QFrame*);
     void data(double *data);
     //void center();
     //bool notifyZeroed();
@@ -41,13 +41,13 @@ private:
 
     int frame_cnt;
 
-    volatile int CptError;
+    std::atomic<int> CptError;
 
     static inline QByteArray to_latin1(const QString& str) { return str.toLatin1(); }
 };
 
 class hatire_metadata : public Metadata
 {
-    QString name() { return QString(QCoreApplication::translate("hatire_metadata", "Hatire Arduino")); }
+    QString name() { return otr_tr("Hatire Arduino"); }
     QIcon icon() { return QIcon(":/images/hat.png"); }
 };

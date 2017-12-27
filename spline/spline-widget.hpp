@@ -40,8 +40,7 @@ public:
     spline_widget(QWidget *parent = 0);
     ~spline_widget();
 
-    spline* config();
-    void setConfig(spline* spl);
+    void setConfig(base_spline* spl);
 
     QColor colorBezier() const;
     void setColorBezier(QColor color);
@@ -52,8 +51,8 @@ public:
 
     double x_step() { return _x_step; }
     double y_step() { return _y_step; }
-    void set_x_step(double val) { _x_step = val; }
-    void set_y_step(double val) { _y_step = val; }
+    void set_x_step(double val) { _x_step = std::fmax(1., val); }
+    void set_y_step(double val) { _y_step = std::fmax(1., val); }
 
     void set_snap(double x, double y) { snap_x = x; snap_y = y; }
     void get_snap(double& x, double& y) const { x = snap_x; y = snap_y; }
@@ -86,11 +85,12 @@ private:
     QPoint point_to_pixel(const QPointF& point);
 
     QPointF c;
-    spline* _config;
+    base_spline* _config;
 
     QPixmap _background;
     QPixmap _function;
     QColor spline_color;
+    QColor widget_bg_color = palette().background().color();
 
     // bounds of the rectangle user can interact with
     QRect pixel_bounds;

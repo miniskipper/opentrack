@@ -35,12 +35,13 @@ rift_tracker_080::~rift_tracker_080()
     ovr_Shutdown();
 }
 
-void rift_tracker_080::start_tracker(QFrame*)
+module_status rift_tracker_080::start_tracker(QFrame*)
 {
     ovrResult code;
     ovrGraphicsLuid luid = {{0}};
 
-    if (!OVR_SUCCESS(code = ovr_Initialize(nullptr)))
+    code = ovr_Initialize(nullptr);
+    if (!OVR_SUCCESS(code))
         goto error;
 
     code = ovr_Create(&hmd, &luid);
@@ -51,7 +52,7 @@ void rift_tracker_080::start_tracker(QFrame*)
                           ovrTrackingCap_Orientation | ovrTrackingCap_MagYawCorrection | ovrTrackingCap_Position,
                           ovrTrackingCap_Orientation);
 
-    return;
+    return status_ok();
 error:
     ovrErrorInfo err;
     err.Result = code;
@@ -62,11 +63,7 @@ error:
     if (strerror.size() == 0)
         strerror = "Unknown reason";
 
-    QMessageBox::warning(nullptr,
-                         "Error",
-                         QStringLiteral("Unable to start Rift tracker: %1").arg(strerror),
-                         QMessageBox::Ok,
-                         QMessageBox::NoButton);
+    return error(strerror);
 }
 
 void rift_tracker_080::data(double *data)
@@ -76,8 +73,8 @@ void rift_tracker_080::data(double *data)
         ovrTrackingState ss = ovr_GetTrackingState(hmd, 0, false);
         if (ss.StatusFlags & ovrStatus_OrientationTracked)
         {
-            static constexpr float c_mult = 16;
-            static constexpr float c_div = 1/c_mult;
+            constexpr float c_mult = 16;
+            constexpr float c_div = 1/c_mult;
 
             Vector3f axis;
             float angle;
@@ -103,7 +100,7 @@ void rift_tracker_080::data(double *data)
                     yaw_ += s.constant_drift;
                 old_yaw = yaw_;
             }
-            static constexpr double d2r = 180 / M_PI;
+            constexpr double d2r = 180 / M_PI;
             data[Yaw] = yaw_                   * -d2r;
             data[Pitch] = double(pitch)        *  d2r;
             data[Roll] = double(roll)          *  d2r;

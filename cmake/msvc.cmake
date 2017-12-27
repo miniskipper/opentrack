@@ -3,7 +3,7 @@
 # mkdir build && cmake -DCMAKE_TOOLCHAIN_FILE=$(pwd)/../cmake/msvc.cmake build/
 
 SET(CMAKE_SYSTEM_NAME Windows)
-SET(CMAKE_SYSTEM_VERSION 1)
+SET(CMAKE_SYSTEM_VERSION 6.0)
 
 # search for programs in the host directories
 SET(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
@@ -11,16 +11,26 @@ SET(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
 SET(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
 SET(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
 
+set(cc "")
 # oldest CPU supported here is Northwood-based Pentium 4. -sh 20150811
-set(cc "/O2it /Ob2 /fp:fast /GS- /GF /GL /Gw /Gy")
+set(cc "${cc} -O2 -O2it -Oy- -Ob2 -fp:fast -GS- -GF -GL -Gw -Gy -Gm")
+set(cc "${cc} -Zo -FS -Zc:threadSafeInit -arch:SSE2 -D_HAS_EXCEPTIONS=0")
+set(cc "${cc} -bigobj")
+set(cc "${cc} -Zc:inline -Zc:rvalueCast -Zc:sizedDealloc -Zc:throwingNew")
+set(cc "${cc} -Qvec-report:1")
 
 set(warns_ "")
 
-#C4244: 'return': conversion from '__int64' to 'long', possible loss of data
-set(warns-disable 4530 4577 4789 4244)
+set(warns-disable 4530 4577 4789 4244 4702 4530 4244 4127 4458 4456 4251 4100)
 
 foreach(i ${warns-disable})
-    set(warns_ "${warns_} /wd${i}")
+    set(warns_ "${warns_} -wd${i}")
+endforeach()
+
+foreach(k CMP0020 CMP0022 CMP0058 CMP0028 CMP0042 CMP0063 CMP0053 CMP0011 CMP0054 CMP0012)
+    if(POLICY ${k})
+        cmake_policy(SET ${k} NEW)
+    endif()
 endforeach()
 
 if(CMAKE_PROJECT_NAME STREQUAL "opentrack")
@@ -34,68 +44,57 @@ if(CMAKE_PROJECT_NAME STREQUAL "opentrack")
     set(warns-noerr 4265)
 
     foreach(i ${warns})
-        set(warns_ "${warns_} /w1${i} /we${i}")
+        set(warns_ "${warns_} -w1${i} -we${i}")
     endforeach()
 
     foreach(i ${warns-noerr})
-        set(warns_ "${warns_} /w1${i}")
+        set(warns_ "${warns_} -w1${i}")
     endforeach()
-    set(cc "${cc} /GR- /arch:SSE2")
+    set(cc "${cc} -GR-")
 endif()
 
-set(silly "${warns_} -MT -Gm -Zi")
+set(base-cflags "${warns_} -MT -Zi -cgthreads8 -W4")
+#set(base-cflags "${base-cflags} -d2cgsummary")
+#set(base-cflags "${base-cflags} -Bt")
 
-set(_CFLAGS "${silly}")
-set(_CXXFLAGS "${silly}")
+set(_CFLAGS "${base-cflags}")
+set(_CXXFLAGS "${base-cflags}")
 set(_CFLAGS_RELEASE "${cc}")
-set(_CFLAGS_DEBUG "/GS /sdl /Gs /guard:cf")
+set(_CFLAGS_DEBUG "-GS -sdl -Gs -guard:cf")
 set(_CXXFLAGS_RELEASE "${cc}")
 set(_CXXFLAGS_DEBUG "${_CFLAGS_DEBUG}")
 
-set(_LDFLAGS "/WX")
-set(_LDFLAGS_RELEASE "/LTCG:INCREMENTAL /OPT:REF /OPT:ICF=10")
+set(_LDFLAGS "-machine:X86 -DEBUG")
+set(_LDFLAGS_RELEASE "-LTCG:INCREMENTAL -OPT:REF -OPT:ICF=10")
 set(_LDFLAGS_DEBUG "")
 
-set(_LDFLAGS_STATIC "/WX")
-set(_LDFLAGS_STATIC_RELEASE "/LTCG:INCREMENTAL")
+set(_LDFLAGS_STATIC "-machine:X86 -WX")
+set(_LDFLAGS_STATIC_RELEASE "-LTCG:INCREMENTAL")
 set(_LDFLAGS_STATIC_DEBUG "")
 
-foreach(j C CXX)
-    foreach(i "" _DEBUG _RELEASE)
-        set(OVERRIDE_${j}_FLAGS${i} "" CACHE STRING "")
-        set(CMAKE_${j}_FLAGS${i} "${_${j}FLAGS${i}} ${OVERRIDE_${j}_FLAGS${i}}" CACHE STRING "" FORCE)
-    endforeach()
-    set(CMAKE_${j}_FLAGS "${_${j}FLAGS} ${_${j}_WARNS} ${OVERRIDE_${j}_FLAGS}" CACHE STRING "" FORCE)
-endforeach()
+set(CMAKE_RC_FLAGS "/nologo -DWIN32")
 
-foreach(j "" _DEBUG _RELEASE)
-    foreach(i MODULE EXE SHARED)
-        set(OVERRIDE_LDFLAGS${j} "" CACHE STRING "")
-        set(CMAKE_${i}_LINKER_FLAGS${j} "${_LDFLAGS${j}} ${OVERRIDE_LDFLAGS${j}}" CACHE STRING "" FORCE)
-    endforeach()
-endforeach()
-
-set(OVERRIDE_LDFLAGS_STATIC "" CACHE STRING "")
-set(OVERRIDE_LDFLAGS_STATIC_RELEASE "" CACHE STRING "")
-set(OVERRIDE_LDFLAGS_STATIC_DEBUG "" CACHE STRING "")
-
-set(CMAKE_STATIC_LINKER_FLAGS "${_LDFLAGS_STATIC} ${OVERRIDE_LDFLAGS_STATIC}" CACHE STRING "" FORCE)
-set(CMAKE_STATIC_LINKER_FLAGS_RELEASE "${_LDFLAGS_STATIC_RELEASE} ${OVERRIDE_LDFLAGS_STATIC_RELEASE}" CACHE STRING "" FORCE)
-set(CMAKE_STATIC_LINKER_FLAGS_DEBUG "${_LDFLAGS_STATIC_DEBUG} ${OVERRIDE_LDFLAGS_STATIC_DEBUG}" CACHE STRING "" FORCE)
-
-set(CMAKE_BUILD_TYPE_INIT RELEASE)
-# for nmake/jom build directories
-if(NOT CMAKE_BUILD_TYPE)
+set(new-__otr_already_initialized "_${cc}_${base-cflags}_")
+if(NOT "${__otr_already_initialized}" STREQUAL "${new-__otr_already_initialized}")
+    set(__otr_already_initialized "${cc}__${base-cflags}" CACHE INTERNAL "" FORCE)
+    set(CMAKE_INSTALL_PREFIX "${CMAKE_BINARY_DIR}/install" CACHE PATH "" FORCE)
     set(CMAKE_BUILD_TYPE "RELEASE" CACHE STRING "" FORCE)
-endif()
 
-if(CMAKE_PROJECT_NAME STREQUAL "opentrack")
-    foreach (i CMAKE_CXX_FLAGS CMAKE_C_FLAGS)
-        string(REGEX MATCH "((^| )[-/][W][0-9]( |\$))" ret "${${i}}")
-        if(ret STREQUAL "")
-            set(${i} "-W3 ${${i}}" CACHE STRING "" FORCE)
-        endif()
+    set(CMAKE_STATIC_LINKER_FLAGS "${_LDFLAGS_STATIC}" CACHE STRING "" FORCE)
+    set(CMAKE_STATIC_LINKER_FLAGS_RELEASE "${_LDFLAGS_STATIC_RELEASE}" CACHE STRING "" FORCE)
+    set(CMAKE_STATIC_LINKER_FLAGS_DEBUG "${_LDFLAGS_STATIC_DEBUG}" CACHE STRING "" FORCE)
+
+    foreach(j C CXX)
+        foreach(i "" _DEBUG _RELEASE)
+            set(CMAKE_${j}_FLAGS${i} "${_${j}FLAGS${i}}" CACHE STRING "" FORCE)
+        endforeach()
+    endforeach()
+
+    foreach(j "" _DEBUG _RELEASE)
+        foreach(i MODULE EXE SHARED)
+            set(CMAKE_${i}_LINKER_FLAGS${j} "${_LDFLAGS${j}}" CACHE STRING "" FORCE)
+        endforeach()
     endforeach()
 endif()
 
-set(CMAKE_RC_FLAGS "-nologo -DWIN32" CACHE STRING "" FORCE)
+include("${CMAKE_CURRENT_LIST_DIR}/opentrack-policy.cmake")

@@ -8,6 +8,7 @@
 
 #include "ftnoir_tracker_pt.h"
 #include "compat/camera-names.hpp"
+#include "compat/math-imports.hpp"
 #include <QHBoxLayout>
 #include <cmath>
 #include <QDebug>
@@ -15,14 +16,13 @@
 #include <QCoreApplication>
 #include <functional>
 
-//#define PT_PERF_LOG	//log performance
-
-//-----------------------------------------------------------------------------
 Tracker_PT::Tracker_PT() :
       point_count(0),
       commands(0),
       ever_success(false)
 {
+    cv::setBreakOnError(true);
+
     connect(s.b.get(), SIGNAL(saving()), this, SLOT(maybe_reopen_camera()), Qt::DirectConnection);
     connect(&s.fov, SIGNAL(valueChanged(int)), this, SLOT(set_fov(int)), Qt::DirectConnection);
     set_fov(s.fov);
@@ -51,35 +51,36 @@ void Tracker_PT::reset_command(Command command)
 
 void Tracker_PT::run()
 {
-    cv::setNumThreads(0);
+    cv::setNumThreads(1);
 
 #ifdef PT_PERF_LOG
-    QFile log_file(QCoreApplication::applicationDirPath() + "/PointTrackerPerformance.txt");
+    QFile log_file(OPENTRACK_BASE_PATH + "/PointTrackerPerformance.txt");
     if (!log_file.open(QIODevice::WriteOnly | QIODevice::Text)) return;
     QTextStream log_stream(&log_file);
 #endif
 
-    maybe_reopen_camera();
-
     while((commands & ABORT) == 0)
     {
         CamInfo cam_info;
-        bool new_frame;
+        bool new_frame = false;
 
         {
             QMutexLocker l(&camera_mtx);
-            std::tie(new_frame, cam_info) = camera.get_frame(frame);
+
+            if (camera)
+                std::tie(new_frame, cam_info) = camera.get_frame(frame);
         }
 
         if (new_frame)
         {
-            cv::resize(frame, preview_frame, cv::Size(preview_size.width(), preview_size.height()), 0, 0, cv::INTER_NEAREST);
+            cv::resize(frame, preview_frame,
+                       cv::Size(preview_size.width(), preview_size.height()),
+                       0, 0, cv::INTER_NEAREST);
 
             point_extractor.extract_points(frame, preview_frame, points);
             point_count = points.size();
 
-            f fx;
-            cam_info.get_focal_length(fx);
+            const double fx = cam_info.get_focal_length();
 
             const bool success = points.size() >= PointModel::N_POINTS;
 
@@ -99,12 +100,13 @@ void Tracker_PT::run()
                     X_CM = point_tracker.pose();
                 }
 
-                Affine X_MH(mat33::eye(), vec3(s.t_MH_x, s.t_MH_y, s.t_MH_z)); // just copy pasted these lines from below
+                // just copy pasted these lines from below
+                Affine X_MH(mat33::eye(), vec3(s.t_MH_x, s.t_MH_y, s.t_MH_z));
                 Affine X_GH = X_CM * X_MH;
                 vec3 p = X_GH.t; // head (center?) position in global space
-                vec2 p_(p[0] / p[2] * fx, p[1] / p[2] * fx);  // projected to screen
+                vec2 p_((p[0] * fx) / p[2], (p[1] * fx) / p[2]);  // projected to screen
 
-                static constexpr int len = 9;
+                constexpr int len = 9;
 
                 cv::Point p2(iround(p_[0] * preview_frame.cols + preview_frame.cols/2),
                              iround(-p_[1] * preview_frame.cols + preview_frame.rows/2));
@@ -136,7 +138,6 @@ void Tracker_PT::maybe_reopen_camera()
     switch (status)
     {
     case Camera::open_error:
-        qDebug() << "can't start camera" << s.camera_name;
         break;
     case Camera::open_ok_change:
         frame = cv::Mat();
@@ -152,7 +153,7 @@ void Tracker_PT::set_fov(int value)
     camera.set_fov(value);
 }
 
-void Tracker_PT::start_tracker(QFrame* video_frame)
+module_status Tracker_PT::start_tracker(QFrame* video_frame)
 {
     //video_frame->setAttribute(Qt::WA_NativeWindow);
     preview_size = video_frame->size();
@@ -160,14 +161,19 @@ void Tracker_PT::start_tracker(QFrame* video_frame)
     preview_frame = cv::Mat(video_frame->height(), video_frame->width(), CV_8UC3);
     preview_frame.setTo(cv::Scalar(0, 0, 0));
 
-    video_widget = qptr<cv_video_widget>(video_frame);
-    layout = qptr<QHBoxLayout>(video_frame);
+    video_widget = std::make_unique<cv_video_widget>(video_frame);
+    layout = std::make_unique<QHBoxLayout>(video_frame);
     layout->setContentsMargins(0, 0, 0, 0);
-    layout->addWidget(video_widget.data());
-    video_frame->setLayout(layout.data());
+    layout->addWidget(video_widget.get());
+    video_frame->setLayout(layout.get());
     //video_widget->resize(video_frame->width(), video_frame->height());
     video_frame->show();
-    start();
+
+    maybe_reopen_camera();
+
+    start(QThread::HighPriority);
+
+    return status_ok();
 }
 
 void Tracker_PT::data(double *data)
@@ -185,12 +191,6 @@ void Tracker_PT::data(double *data)
                    -1, 0, 0,
                    0, 1, 0);
         mat33 R = R_EG *  X_GH.R * R_EG.t();
-
-        using std::atan2;
-        using std::sqrt;
-        using std::atan;
-        using std::fabs;
-        using std::copysign;
 
         // get translation(s)
         const vec3& t = X_GH.t;

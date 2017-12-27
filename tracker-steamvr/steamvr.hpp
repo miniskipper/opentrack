@@ -40,6 +40,7 @@ struct device_spec
     QString model, serial, type;
     unsigned k;
     QString to_string() const;
+    bool is_connected;
 };
 
 struct device_list final
@@ -48,9 +49,9 @@ struct device_list final
 
     device_list();
     void refresh_device_list();
-    const QList<device_spec>& devices() const & { return device_specs; }
+    const QList<device_spec>& devices() const { return device_specs; }
 
-    static OTR_NEVER_INLINE maybe_pose get_pose(int k);
+    static never_inline maybe_pose get_pose(int k);
     static QString strerror(error_t error);
     static constexpr int max_devices = int(vr::k_unMaxTrackedDeviceCount);
 
@@ -61,7 +62,6 @@ private:
     QList<device_spec> device_specs;
     static QMutex mtx;
     static tt vr_init_();
-    static void vr_deleter();
     static void fill_device_specs(QList<device_spec>& list);
     static tt vr_init();
 };
@@ -76,7 +76,7 @@ class steamvr : public QObject, public ITracker
 public:
     steamvr();
     ~steamvr() override;
-    void start_tracker(QFrame *) override;
+    module_status start_tracker(QFrame *) override;
     void data(double *data) override;
     bool center() override;
 
@@ -108,6 +108,6 @@ private slots:
 class steamvr_metadata : public Metadata
 {
 public:
-    QString name() override { return QString(QCoreApplication::translate("steamvr_metadata", "Valve SteamVR")); }
+    QString name() override { return otr_tr("Valve SteamVR"); }
     QIcon icon() override { return QIcon(":/images/rift_tiny.png"); }
 };

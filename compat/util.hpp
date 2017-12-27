@@ -1,57 +1,26 @@
 #pragma once
 
+#include "opentrack-library-path.h"
 #include "ndebug-guard.hpp"
 #include "run-in-thread.hpp"
 #include "meta.hpp"
 #include "functional.hpp"
+#include "macros.hpp"
+#include "value-templates.hpp"
 
+#include <type_traits>
 #include <memory>
 #include <cmath>
 #include <utility>
 
-#include <QSharedPointer>
+#include <iterator>
+
 #include <QDebug>
 
-#define progn(...) ([&]() { __VA_ARGS__ }())
+#define progn(...) (([&]() { __VA_ARGS__ })())
 #define prog1(x, ...) (([&]() { auto _ret1324 = (x); do { __VA_ARGS__; } while (0); return _ret1324; })())
 
-#define once_only(...) progn(static bool once = false; if (!once) { once = true; __VA_ARGS__; })
-#define load_time_value(x) \
-    progn( \
-        static const auto _value132((x)); \
-        return static_cast<decltype(_value132)&>(value132); \
-    )
-
-template<typename t> using mem = std::shared_ptr<t>;
-template<typename t> using ptr = std::unique_ptr<t>;
-
-#ifdef Q_CREATOR_RUN
-#   define DEFUN_WARN_UNUSED
-#elif defined(_MSC_VER)
-#   define DEFUN_WARN_UNUSED _Check_return_
-#else
-#   define DEFUN_WARN_UNUSED __attribute__((warn_unused_result))
-#endif
-
-#if defined(__GNUG__)
-#   define unused(t, i) t __attribute__((unused)) i
-#else
-#   define unused(t, i) t
-#endif
-
-#if !defined(_WIN32)
-#   define unused_on_unix(t, i) unused(t, i)
-#else
-#   define unused_on_unix(t, i) t i
-#endif
-
-#if defined __GNUC__
-#   define likely(x)       __builtin_expect((x),1)
-#   define unlikely(x)     __builtin_expect((x),0)
-#else
-#   define likely(x) (x)
-#   define unlikely(x) (x)
-#endif
+#define once_only(...) do { static bool once = false; if (!once) { once = true; __VA_ARGS__; } } while(false)
 
 template<typename t>
 inline int iround(const t& val)
@@ -68,55 +37,52 @@ inline unsigned uround(const t& val)
 namespace util_detail {
 
 template<typename n>
-inline auto clamp_(n val, n min, n max) -> n
+inline auto clamp_float(n val, n min_, n max_)
 {
-    if (unlikely(val > max))
-        return max;
-    if (unlikely(val < min))
-        return min;
-    return val;
+    return std::fmin(std::fmax(val, min_), max_);
 }
 
-}
+template<typename t, typename n>
+struct clamp final
+{
+    static inline auto clamp_(const n& val, const n& min_, const n& max_)
+    {
+        if (unlikely(val > max_))
+            return max_;
+        if (unlikely(val < min_))
+            return min_;
+        return val;
+    }
+};
+
+template<typename t>
+struct clamp<float, t>
+{
+    static inline auto clamp_(float val, float min_, float max_)
+    {
+        return clamp_float(val, min_, max_);
+    }
+};
+
+template<typename t>
+struct clamp<double, t>
+{
+    static inline auto clamp_(double val, double min_, double max_)
+    {
+        return clamp_float(val, min_, max_);
+    }
+};
+
+} // ns util_detail
 
 template<typename t, typename u, typename w>
-inline auto clamp(const t& val, const u& min, const w& max) -> decltype(val + min + max)
+inline auto clamp(const t& val, const u& min, const w& max)
 {
-    return ::util_detail::clamp_<decltype(val + min + max)>(val, min, max);
+    using tp = decltype(val + min + max);
+    return ::util_detail::clamp<std::decay_t<tp>, tp>::clamp_(val, min, max);
 }
 
-template<typename t, typename... xs>
-auto qptr(xs... args)
-{
-    return QSharedPointer<t>(new t(std::forward<xs>(args)...));
-}
+template<typename t>
+using cv_qualified = std::conditional_t<is_fundamental_v<std::decay_t<t>>, std::decay_t<t>, const t&>;
 
-template<typename t> using qshared = QSharedPointer<t>;
 
-#if defined _MSC_VER
-#   define OTR_NEVER_INLINE __declspec(noinline)
-#elif defined __GNUG__
-#   define OTR_NEVER_INLINE __attribute__((noinline))
-#else
-#   define OTR_NEVER_INLINE
-#endif
-
-#if defined _MSC_VER || defined __GNUG__
-#   define OTR_RESTRICT __restrict
-#else
-#   define OTR_RESTRICT
-#endif
-
-#if defined _MSC_VER
-#   define OTR_ALWAYS_INLINE __forceinline
-#elif defined __GNUG__
-#   define OTR_ALWAYS_INLINE __attribute__((always_inline))
-#else
-#   define OTR_ALWAYS_INLINE inline
-#endif
-
-#if defined __GNUG__
-#   define OTR_FLATTEN __attribute__((flatten))
-#else
-#   define OTR_FLATTEN OTR_ALWAYS_INLINE
-#endif

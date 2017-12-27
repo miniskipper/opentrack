@@ -99,11 +99,11 @@ vjoystick_proto::vjoystick_proto()
     {
         QMessageBox msgbox;
         msgbox.setIcon(QMessageBox::Critical);
-        msgbox.setText(QCoreApplication::translate("vjoystick_proto", "vjoystick driver missing"));
-        msgbox.setInformativeText(QCoreApplication::translate("vjoystick_proto", "vjoystick won't work without the driver installed."));
+        msgbox.setText(otr_tr("vjoystick driver missing"));
+        msgbox.setInformativeText(otr_tr("vjoystick won't work without the driver installed."));
 
-        QPushButton* driver_button = msgbox.addButton(QCoreApplication::translate("vjoystick_proto", "Download the driver"), QMessageBox::ActionRole);
-        QPushButton* project_site_button = msgbox.addButton(QCoreApplication::translate("vjoystick_proto", "Visit project site"), QMessageBox::ActionRole);
+        QPushButton* driver_button = msgbox.addButton(otr_tr("Download the driver"), QMessageBox::ActionRole);
+        QPushButton* project_site_button = msgbox.addButton(otr_tr("Visit project site"), QMessageBox::ActionRole);
         msgbox.addButton(QMessageBox::Close);
 
         (void) msgbox.exec();
@@ -123,6 +123,21 @@ vjoystick_proto::vjoystick_proto()
 
 vjoystick_proto::~vjoystick_proto()
 {
+}
+
+module_status vjoystick_proto::initialize()
+{
+    switch (h.get_state())
+    {
+    case state_notent:
+        return error("vjoystick #1 doesn't exist");
+    case state_fail:
+        return error("can't initialize vjoystick");
+    case state_success:
+        return status_ok();
+    default:
+        return error("unknown error");
+    }
 }
 
 void vjoystick_proto::pose(const double *pose)

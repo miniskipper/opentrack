@@ -31,12 +31,6 @@
 
 namespace options {
 
-namespace detail {
-
-OTR_OPTIONS_EXPORT void acct_lookup(bool is_fresh);
-
-} // ns detail
-
 template<typename t>
 class value final : public base_value
 {
@@ -48,9 +42,12 @@ class value final : public base_value
         return val1.value<element_type>() == val2.value<element_type>();
     }
 
-    OTR_NEVER_INLINE
+    never_inline
     t get() const
     {
+        if (self_name.isEmpty())
+            return def;
+
         if (!b->contains(self_name) || b->get<QVariant>(self_name).type() == QVariant::Invalid)
             return def;
 
@@ -60,67 +57,81 @@ class value final : public base_value
     }
 
 public:
-    OTR_NEVER_INLINE
+    never_inline
     t operator=(const t& datum)
     {
+        if (self_name.isEmpty())
+            return def;
+
         if (datum != get())
             store(traits::to_storage(datum));
+
         return datum;
     }
 
-    static constexpr const Qt::ConnectionType DIRECT_CONNTYPE = Qt::DirectConnection;
-    static constexpr const Qt::ConnectionType SAFE_CONNTYPE = Qt::QueuedConnection;
+    static constexpr inline Qt::ConnectionType DIRECT_CONNTYPE = Qt::DirectConnection;
+    static constexpr inline Qt::ConnectionType SAFE_CONNTYPE = Qt::QueuedConnection;
 
-    OTR_NEVER_INLINE
+    never_inline
     value(bundle b, const QString& name, t def) :
         base_value(b, name, &is_equal, std::type_index(typeid(element_type))),
         def(def)
     {
-        QObject::connect(b.get(), SIGNAL(reloading()),
-                         this, SLOT(reload()),
-                         DIRECT_CONNTYPE);
+        if (!self_name.isEmpty())
+            QObject::connect(b.get(), SIGNAL(reloading()),
+                             this, SLOT(reload()),
+                             DIRECT_CONNTYPE);
     }
 
-    OTR_NEVER_INLINE
-    value(bundle b, const char* name, t def) : value(b, QString(name), def)
+    template<unsigned k>
+    inline value(bundle b, const char (&name)[k], t def) : value(b, QLatin1String(name, k-1), def)
     {
+        static_assert(k > 0, "");
     }
 
-    OTR_NEVER_INLINE
+    never_inline
     t default_value() const
     {
         return def;
     }
 
-    OTR_NEVER_INLINE
+    never_inline
     void set_to_default() override
     {
         *this = def;
     }
 
-    OTR_NEVER_INLINE
+    never_inline
     operator t() const { return std::forward<t>(get()); }
 
-    OTR_NEVER_INLINE
+    never_inline
+    t operator->() const
+    {
+        return get();
+    }
+
+    never_inline
     void reload() override
     {
-        *this = static_cast<t>(*this);
+        if (!self_name.isEmpty())
+            *this = static_cast<t>(*this);
     }
 
-    OTR_NEVER_INLINE
+    never_inline
     void bundle_value_changed() const override
     {
-        emit valueChanged(traits::to_storage(get()));
+        if (!self_name.isEmpty())
+            emit valueChanged(traits::to_storage(get()));
     }
 
-    OTR_NEVER_INLINE
+    never_inline
     t operator()() const
     {
         return get();
     }
 
     template<typename u>
-    OTR_NEVER_INLINE
+    never_inline
     u to() const
     {
         return static_cast<u>(std::forward<t>(get()));
@@ -129,5 +140,30 @@ public:
 private:
     const t def;
 };
+
+#if defined _MSC_VER
+
+#   if !defined OTR_OPT_VALUE
+#      define OTR_OPT_VALUE OTR_TEMPLATE_IMPORT
+#   endif
+
+    OTR_OPT_VALUE value<double>;
+    OTR_OPT_VALUE value<float>;
+    OTR_OPT_VALUE value<int>;
+    OTR_OPT_VALUE value<bool>;
+    OTR_OPT_VALUE value<QString>;
+    OTR_OPT_VALUE value<slider_value>;
+    OTR_OPT_VALUE value<QPointF>;
+    OTR_OPT_VALUE value<QVariant>;
+
+    OTR_OPT_VALUE value<QList<double>>;
+    OTR_OPT_VALUE value<QList<float>>;
+    OTR_OPT_VALUE value<QList<int>>;
+    OTR_OPT_VALUE value<QList<bool>>;
+    OTR_OPT_VALUE value<QList<QString>>;
+    OTR_OPT_VALUE value<QList<slider_value>>;
+    OTR_OPT_VALUE value<QList<QPointF>>;
+
+#endif
 
 } // ns options

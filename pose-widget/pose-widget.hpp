@@ -7,15 +7,18 @@
 
 #pragma once
 
+#include "api/plugin-api.hpp"
+#include "compat/euler.hpp"
+
+#include <tuple>
+#include <mutex>
+#include <atomic>
+#include <vector>
+
 #include <QtGlobal>
 #include <QWidget>
 #include <QThread>
 #include <QPixmap>
-#include "api/plugin-api.hpp"
-#include "compat/euler.hpp"
-
-#include <mutex>
-#include <atomic>
 
 #ifdef BUILD_POSE_WIDGET
 #   define POSE_WIDGET_EXPORT Q_DECL_EXPORT
@@ -28,6 +31,8 @@ namespace pose_widget_impl {
 using num = float;
 using vec3 = Mat<num, 3, 1>;
 using vec2 = Mat<num, 2, 1>;
+using vec2i = Mat<int, 2, 1>;
+using vec2u = Mat<int, 2, 1>;
 
 using rmat = Mat<num, 3, 3>;
 
@@ -37,12 +42,18 @@ using lock_guard = std::unique_lock<std::mutex>;
 
 class pose_widget;
 
-struct pose_transform final : private QThread
+class Triangle {
+    num dot00, dot01, dot11, invDenom;
+    vec2 v0, v1, origin;
+public:
+    Triangle(const vec2& p1, const vec2& p2, const vec2& p3);
+    bool barycentric_coords(const vec2& px, vec2& uv, int& i) const;
+};
+
+struct pose_transform final : QThread
 {
     pose_transform(QWidget* dst);
     ~pose_transform();
-
-    friend class pose_widget;
 
     void rotate_async(double xAngle, double yAngle, double zAngle, double x, double y, double z);
     void rotate_sync(double xAngle, double yAngle, double zAngle, double x, double y, double z);
@@ -55,6 +66,7 @@ struct pose_transform final : private QThread
     vec2 project(const vec3& point);
     vec3 project2(const vec3& point);
     void project_quad_texture();
+    std::pair<vec2i, vec2i> get_bounds(const vec2& size);
 
     template<typename F>
     inline void with_image_lock(F&& fun);
@@ -68,6 +80,14 @@ struct pose_transform final : private QThread
 
     QImage front, back;
     QImage image, image2;
+
+    struct uv_
+    {
+        vec2 coords;
+        int i;
+    };
+
+    std::vector<uv_> uv_vec;
 
     std::atomic<bool> fresh;
 

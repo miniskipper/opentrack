@@ -28,7 +28,7 @@ TrackerDialog_PT::TrackerDialog_PT()
     tie_setting(s.cam_res_y, ui.res_y_spin);
     tie_setting(s.cam_fps, ui.fps_spin);
 
-    tie_setting(s.threshold, ui.threshold_slider);
+    tie_setting(s.threshold_slider, ui.threshold_slider);
 
     tie_setting(s.min_point_size, ui.mindiam_spin);
     tie_setting(s.max_point_size, ui.maxdiam_spin);
@@ -63,7 +63,7 @@ TrackerDialog_PT::TrackerDialog_PT()
 
     tie_setting(s.auto_threshold, ui.auto_threshold);
 
-    connect( ui.tcalib_button,SIGNAL(toggled(bool)), this,SLOT(startstop_trans_calib(bool)));
+    connect(ui.tcalib_button,SIGNAL(toggled(bool)), this, SLOT(startstop_trans_calib(bool)));
 
     connect(ui.buttonBox, SIGNAL(accepted()), this, SLOT(doOK()));
     connect(ui.buttonBox, SIGNAL(rejected()), this, SLOT(doCancel()));
@@ -76,15 +76,59 @@ TrackerDialog_PT::TrackerDialog_PT()
     timer.setInterval(250);
 
     connect(&calib_timer, &QTimer::timeout, this, &TrackerDialog_PT::trans_calib_step);
-    calib_timer.setInterval(100);
+    calib_timer.setInterval(35);
 
     poll_tracker_info_impl();
 
-    connect(this, &TrackerDialog_PT::poll_tracker_info, this, &TrackerDialog_PT::poll_tracker_info_impl, Qt::QueuedConnection);
+    connect(this, &TrackerDialog_PT::poll_tracker_info, this, &TrackerDialog_PT::poll_tracker_info_impl, Qt::DirectConnection);
+
+    static constexpr pt_color_type color_types[] = {
+        pt_color_average,
+        pt_color_natural,
+        pt_color_red_only,
+        pt_color_blue_only,
+    };
+
+    for (unsigned k = 0; k < std::size(color_types); k++)
+        ui.blob_color->setItemData(k, int(color_types[k]));
+
+    tie_setting(s.blob_color, ui.blob_color);
+
+    tie_setting(s.threshold_slider, ui.threshold_value_display, [this](const slider_value& val) {
+        return threshold_display_text(int(val));
+    });
+
+    // refresh threshold display on auto-threshold checkbox state change
+    tie_setting(s.auto_threshold,
+                this,
+                [this](bool) { s.threshold_slider.notify(); });
+}
+
+QString TrackerDialog_PT::threshold_display_text(int threshold_value)
+{
+    if (!s.auto_threshold)
+        return tr("Brightness %1/255").arg(threshold_value);
+    else
+    {
+        CamInfo info;
+        int w = s.cam_res_x, h = s.cam_res_y;
+
+        if (w * h <= 0)
+            w = 640, h = 480;
+
+        if (tracker && tracker->get_cam_info(&info) && info.res_x * info.res_y != 0)
+            w = info.res_x, h = info.res_y;
+
+        double value = PointExtractor::threshold_radius_value(w, h, threshold_value);
+
+        return tr("LED radius %1 pixels").arg(value, 0, 'f', 2);
+    }
 }
 
 void TrackerDialog_PT::startstop_trans_calib(bool start)
 {
+    QMutexLocker l(&calibrator_mutex);
+
     if (start)
     {
         qDebug() << "pt: starting translation calibration";
@@ -102,16 +146,31 @@ void TrackerDialog_PT::startstop_trans_calib(bool start)
         qDebug() << "pt: stopping translation calibration";
         {
             cv::Vec3f tmp;
-            unsigned nsamples;
+            cv::Vec3i nsamples;
             std::tie(tmp, nsamples) = trans_calib.get_estimate();
             s.t_MH_x = int(tmp[0]);
             s.t_MH_y = int(tmp[1]);
             s.t_MH_z = int(tmp[2]);
 
-            static constexpr unsigned min_samples = 80;
-            const QString sample_feedback = nsamples >= min_samples
-                ? tr("%1 samples. Over %2, good!").arg(nsamples).arg(min_samples)
-                : tr("%1 samples. Try for at least %2 for a precise calibration.").arg(nsamples).arg(min_samples);
+            constexpr int min_yaw_samples = 15;
+            constexpr int min_pitch_samples = 15;
+            constexpr int min_samples = min_yaw_samples+min_pitch_samples;
+
+            // Don't bother counting roll samples. Roll calibration is hard enough
+            // that it's a hidden unsupported feature anyway.
+
+            const QString sample_feedback = progn(
+                if (nsamples[0] < min_yaw_samples)
+                    return tr("%1 yaw samples. Yaw more to %2 samples for stable calibration.")
+                        .arg(nsamples[0]).arg(min_yaw_samples);
+                if (nsamples[1] < min_pitch_samples)
+                    return tr("%1 pitch samples. Pitch more to %2 samples for stable calibration.")
+                        .arg(nsamples[1]).arg(min_pitch_samples);
+
+                const unsigned nsamples_total = nsamples[0] + nsamples[1];
+
+                return tr("%1 samples. Over %2, good!").arg(nsamples_total).arg(min_samples);
+            );
 
             ui.sample_count_display->setText(sample_feedback);
         }
@@ -174,6 +233,8 @@ void TrackerDialog_PT::show_camera_settings()
 
 void TrackerDialog_PT::trans_calib_step()
 {
+    QMutexLocker l(&calibrator_mutex);
+
     if (tracker)
     {
         Affine X_CM = tracker->pose();

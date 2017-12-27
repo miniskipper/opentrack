@@ -4,24 +4,19 @@
 # -sh 20140922
 
 SET(CMAKE_SYSTEM_NAME Windows)
-SET(CMAKE_SYSTEM_VERSION 1)
+SET(CMAKE_SYSTEM_VERSION 5)
 
-set(CMAKE_BUILD_TYPE_INIT RELEASE)
-# for nmake/jom build directories
-if(NOT CMAKE_BUILD_TYPE)
-    set(CMAKE_BUILD_TYPE "RELEASE" CACHE STRING "" FORCE)
-endif()
-
-unset(c)
-unset(e)
 # specify the cross compiler
 if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
-    set(p D:/cygwin64/opt/bin/)
+    #set(p D:/cygwin64/opt/bin/)
+    set(p "C:/msys64/mingw32/bin/")
     set(e .exe)
+    set(c "${p}")
+else()
+    set(p "")
+    set(c "${p}i686-w64-mingw32-")
+    set(e "")
 endif()
-#set(c ${p}i686-w64-mingw32-)
-set(c "${p}")
-#set(CMAKE_MAKE_PROGRAM ${p}/mingw32-make.exe CACHE FILEPATH "" FORCE)
 
 SET(CMAKE_C_COMPILER    ${c}gcc${e})
 SET(CMAKE_CXX_COMPILER  ${c}g++${e})
@@ -34,7 +29,6 @@ set(CMAKE_OBJCOPY       ${c}objcopy${e}     CACHE STRING "" FORCE)
 set(CMAKE_OBJDUMP       ${c}objdump${e}     CACHE STRING "" FORCE)
 set(CMAKE_STRIP         ${c}strip${e}       CACHE STRING "" FORCE)
 
-#SET(CMAKE_FIND_ROOT_PATH /usr/i686-w64-mingw32)
 
 # search for programs in the host directories
 SET(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
@@ -44,43 +38,18 @@ SET(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
 
 # oldest CPU supported here is Northwood-based Pentium 4. -sh 20150811
 set(fpu "-ffast-math -mfpmath=both -mstackrealign -falign-functions=16 -falign-loops=16")
-set(cpu "-O3 -march=pentium4 -mtune=corei7-avx -msse -msse2 -mno-sse3 -mno-avx -frename-registers")
-set(lto "-fno-lto -fuse-linker-plugin -flto-compression-level=9 -flto-partition=balanced -fno-ipa-pta -fno-lto-odr-type-merging")
-set(bloat "")
-set(sections "-ffunction-sections -fdata-sections")
+set(cpu "-O3 -march=i686 -msse3 -mtune=skylake -frename-registers")
+#set(lto "-fno-lto -fno-use-linker-plugin -flto-compression-level=9 -flto-partition=balanced -fno-ipa-pta -fno-lto-odr-type-merging")
+set(lto "")
+set(sections "-ffunction-sections -fdata-sections -s")
 
-set(cc "-fdump-statistics-details -fdump-ipa-cgraph -floop-nest-optimize")
+set(cc "")
+#set(cc "-fdump-statistics-details -fdump-ipa-cgraph")
 
-set(_CXX_WARNS "")
-set(_C_WARNS "")
-if(WARNINGS_ENABLE)
-    set(usual-warns "-Wdelete-non-virtual-dtor -Wno-suggest-override -Wno-odr -Wno-attributes -Wcast-align")
-    set(_C_WARNS "-Wall -Wextra -Wpedantic -Wcast-align")
-    set(_CXX_WARNS "${_C_WARNS} ${usual-warns} ${clang-warns} ${noisy-warns} ${missing-override}")
+set(clang-warns "")
+if(CMAKE_COMPILER_IS_CLANG)
+    set(clang-warns "-Wweak-vtables")
 endif()
-
-set(ccflags-common "-fvisibility=hidden -pipe")
-set(_CXXFLAGS "${bloat} ${ccflags-common} ${_CXX_WARNS}")
-set(_CFLAGS "${ccflags-common} -std=c11 ${_C_WARNS}")
-set(_CFLAGS_RELEASE "-s ${cpu} ${fpu} ${lto} ${sections} ${cc}")
-set(_CFLAGS_DEBUG "-g -O0 -fstack-protector-strong")
-set(_CXXFLAGS_RELEASE "${_CFLAGS_RELEASE} -std=c++14 ${cc}")
-set(_CXXFLAGS_DEBUG "${_CFLAGS_DEBUG}")
-
-set(_LDFLAGS "-Wl,--dynamicbase,--no-seh,--nxcompat,--as-needed,--pic-executable")
-set(_LDFLAGS_RELEASE "-Wl,--gc-sections,--exclude-libs,ALL -ffunction-sections")
-set(_LDFLAGS_DEBUG "")
-
-set(enable-val FALSE)
-if(CMAKE_PROJECT_NAME STREQUAL "opentrack")
-    set(enable-val TRUE)
-endif()
-
-set(WARNINGS_ENABLE ${enable-val} CACHE BOOL "Emit additional warnings at compile-time")
-# these are very noisy, high false positive rate. only for development.
-set(WARNINGS_FINAL_SUGGESTIONS FALSE CACHE BOOL "Emit very noisy warnings at compile-time")
-set(WARNINGS_NUMERIC ${enable-val} CACHE BOOL "Emit very noisy warnings at compile-time")
-set(WARNINGS_MISSING_OVERRIDE FALSE CACHE BOOL "Emit very noisy warnings at compile-time")
 
 set(noisy-warns "")
 set(suggest-final "")
@@ -99,10 +68,37 @@ if(WARNINGS_ENABLE)
     set(noisy-warns "${suggest-final} ${numerics}")
 endif()
 
-set(clang-warns "")
-if(CMAKE_COMPILER_IS_CLANG)
-    set(clang-warns "-Wweak-vtables")
+set(_CXX_WARNS "")
+set(_C_WARNS "")
+
+if(WARNINGS_ENABLE)
+    set(usual-warns "-Wdelete-non-virtual-dtor -Wno-suggest-override -Wno-odr -Wno-attributes -Wcast-align")
+    set(_C_WARNS "-Wall -Wextra -Wpedantic -Wcast-align")
+    set(_CXX_WARNS "${_C_WARNS} ${usual-warns} ${clang-warns} ${noisy-warns} ${missing-override}")
 endif()
+
+set(ccflags-common "-fvisibility=hidden -pipe -g3")
+set(_CXXFLAGS "${ccflags-common} ${_CXX_WARNS}")
+set(_CFLAGS "${ccflags-common} -std=c11 ${_C_WARNS}")
+set(_CFLAGS_RELEASE "${cpu} ${fpu} ${lto} ${sections} ${cc}")
+set(_CFLAGS_DEBUG "-g -O0 -fstack-protector-strong")
+set(_CXXFLAGS_RELEASE "${_CFLAGS_RELEASE} ${cc}")
+set(_CXXFLAGS_DEBUG "${_CFLAGS_DEBUG}")
+
+set(_LDFLAGS "-Wl,--dynamicbase,--nxcompat,--as-needed")
+set(_LDFLAGS_RELEASE "-Wl,--gc-sections,--exclude-libs,ALL")
+set(_LDFLAGS_DEBUG "")
+
+set(enable-val FALSE)
+if(CMAKE_PROJECT_NAME STREQUAL "opentrack")
+    set(enable-val TRUE)
+endif()
+
+set(WARNINGS_ENABLE ${enable-val} CACHE BOOL "Emit additional warnings at compile-time")
+# these are very noisy, high false positive rate. only for development.
+set(WARNINGS_FINAL_SUGGESTIONS FALSE CACHE BOOL "Emit very noisy warnings at compile-time")
+set(WARNINGS_NUMERIC ${enable-val} CACHE BOOL "Emit very noisy warnings at compile-time")
+set(WARNINGS_MISSING_OVERRIDE FALSE CACHE BOOL "Emit very noisy warnings at compile-time")
 
 foreach(j C CXX)
     foreach(i "" _DEBUG _RELEASE)
@@ -116,6 +112,8 @@ foreach(j "" _DEBUG _RELEASE)
     endforeach()
 endforeach()
 
-if (CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+if(NOT __otr_toolchain_initialized)
+    set(__otr_toolchain_initialized 1 CACHE INTERNAL "" FORCE)
+    set(CMAKE_BUILD_TYPE "RELEASE" CACHE STRING "" FORCE)
     set(CMAKE_INSTALL_PREFIX "${CMAKE_BINARY_DIR}/install" CACHE PATH "" FORCE)
 endif()

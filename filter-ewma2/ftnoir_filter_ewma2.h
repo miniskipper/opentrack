@@ -25,6 +25,7 @@ public:
     ewma();
     void filter(const double *input, double *output) override;
     void center() override { first_run = true; }
+    module_status initialize() override { return status_ok(); }
 private:
     // Deltas are smoothed over the last 1/60sec.
     const double delta_RC = 1./60;
@@ -58,6 +59,6 @@ private slots:
 class ewmaDll : public Metadata
 {
 public:
-    QString name() { return QString(QCoreApplication::translate("ewmaDll", "EWMA")); }
+    QString name() { return otr_tr("EWMA"); }
     QIcon icon() { return QIcon(":/images/filter-16.png"); }
 };

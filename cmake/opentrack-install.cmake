@@ -1,15 +1,16 @@
-set(opentrack-perms_ WORLD_READ WORLD_EXECUTE OWNER_WRITE OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE)
-set(opentrack-perms PERMISSIONS ${opentrack-perms_})
-
 macro(otr_inst2 path)
-    install(${ARGN} DESTINATION "${path}" ${opentrack-perms})
+    install(${ARGN} DESTINATION "${path}" PERMISSIONS ${opentrack-perms-file})
+endmacro()
+
+macro(otr_inst_exec path)
+    install(${ARGN} DESTINATION "${path}" PERMISSIONS ${opentrack-perms-file})
 endmacro()
 
 macro(otr_inst_dir path)
     install(
         DIRECTORY ${ARGN} DESTINATION "${path}"
-        FILE_PERMISSIONS ${opentrack-perms_}
-        DIRECTORY_PERMISSIONS ${opentrack-perms_}
+        FILE_PERMISSIONS ${opentrack-perms-file}
+        DIRECTORY_PERMISSIONS ${opentrack-perms-dir}
     )
 endmacro()
 
@@ -34,11 +35,15 @@ endif()
 
 otr_inst2("${opentrack-doc-pfx}" FILES ${CMAKE_SOURCE_DIR}/README.md)
 
-otr_inst2("${opentrack-hier-pfx}" FILES "${CMAKE_SOURCE_DIR}/bin/freetrackclient.dll")
-otr_inst2("${opentrack-hier-pfx}" FILES
+otr_inst_exec("${opentrack-hier-pfx}" FILES "${CMAKE_SOURCE_DIR}/bin/freetrackclient.dll")
+otr_inst_exec("${opentrack-hier-pfx}" FILES
     "${CMAKE_SOURCE_DIR}/bin/NPClient.dll"
     "${CMAKE_SOURCE_DIR}/bin/NPClient64.dll"
     "${CMAKE_SOURCE_DIR}/bin/TrackIR.exe")
+
+if(WIN32)
+    otr_inst_exec("${opentrack-hier-pfx}" FILES "${CMAKE_SOURCE_DIR}/bin/amcap.exe")
+endif()
 
 otr_inst2("${opentrack-doc-src-pfx}" FILES "${CMAKE_SOURCE_DIR}/CMakeLists.txt")
 otr_inst2("${opentrack-doc-src-pfx}" FILES "${CMAKE_SOURCE_DIR}/README.md")
@@ -47,38 +52,5 @@ otr_inst2("${opentrack-doc-src-pfx}" FILES "${CMAKE_SOURCE_DIR}/WARRANTY.txt")
 otr_inst2("${opentrack-doc-src-pfx}" FILES "${CMAKE_SOURCE_DIR}/OPENTRACK-LICENSING.txt")
 otr_inst2("${opentrack-doc-src-pfx}" FILES "${CMAKE_SOURCE_DIR}/AUTHORS.md")
 
-function(merge_translations)
-    install(CODE "file(REMOVE_RECURSE \"\${CMAKE_INSTALL_PREFIX}/i18n\")")
-
-    set(all-qm-files "")
-
-    foreach(i ${opentrack-all-translations})
-        get_property(ts-files GLOBAL PROPERTY "opentrack-ts-files-${i}")
-
-        set(ts-files_ "")
-
-        foreach(k ${ts-files})
-            if(EXISTS "${k}")
-                list(APPEND ts-files_ "${k}")
-            endif()
-        endforeach()
-
-        set(ts-files "${ts-files_}")
-
-        if(NOT ".${ts-files}" STREQUAL ".")
-            set(qm-output "${CMAKE_CURRENT_BINARY_DIR}/${i}.qm")
-            list(APPEND all-qm-files "${qm-output}")
-            add_custom_command(OUTPUT "${qm-output}"
-                COMMAND "${Qt5_DIR}/../../../bin/lrelease" -nounfinished -silent ${ts-files} -qm "${qm-output}"
-                DEPENDS ${ts-files}
-                COMMENT "Running lrelease for ${i}"
-            )
-            set(lang-target "i18n-lang-${i}")
-            add_custom_target("${lang-target}" DEPENDS "${qm-output}")
-
-            install(FILES "${qm-output}" DESTINATION "${opentrack-i18n-pfx}" RENAME "${i}.qm" ${opentrack-perms})
-        endif()
-    endforeach()
-    add_custom_target(i18n ALL DEPENDS ${all-qm-files})
-endfunction()
+set(opentrack_disable-i18n-update FALSE CACHE BOOL "")
 

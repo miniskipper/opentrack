@@ -41,7 +41,7 @@ class joystick : public ITracker
 public:
     joystick();
     ~joystick();
-    void start_tracker(QFrame *);
+    module_status start_tracker(QFrame *) { return status_ok(); }
     void data(double *data);
     settings s;
     QString guid;
@@ -72,7 +72,7 @@ private slots:
 class joystickDll : public Metadata
 {
 public:
-    QString name() { return QString(QCoreApplication::translate("joystickDll", "Joystick input")); }
+    QString name() { return otr_tr("Joystick input"); }
     QIcon icon() { return QIcon(":/images/facetracknoir.png"); }
 };
 

@@ -11,8 +11,9 @@
 #include "accela-settings.hpp"
 #include "api/plugin-api.hpp"
 #include "compat/timer.hpp"
+#include "compat/variance.hpp"
+#include "compat/macros.hpp"
 
-#include <atomic>
 #include <QMutex>
 #include <QTimer>
 
@@ -23,15 +24,21 @@ public:
     void filter(const double* input, double *output) override;
     void center() override { first_run = true; }
     spline spline_rot, spline_pos;
+    module_status initialize() override { return status_ok(); }
 private:
     settings_accela s;
-    bool first_run;
     double last_output[6], deltas[6];
     double smoothed_input[2];
     Timer t;
+#if defined DEBUG_ACCELA
+    Timer debug_timer;
+    double debug_max;
+    variance var;
+#endif
+    bool first_run;
 };
 
-class dialog_accela: public IFilterDialog
+class dialog_accela : public IFilterDialog
 {
     Q_OBJECT
 public:
@@ -50,6 +57,6 @@ private slots:
 class accelaDll : public Metadata
 {
 public:
-    QString name() { return QString(QCoreApplication::translate("accelaDll", "Accela")); }
+    QString name() { return otr_tr("Accela"); }
     QIcon icon() { return QIcon(":/images/filter-16.png"); }
 };

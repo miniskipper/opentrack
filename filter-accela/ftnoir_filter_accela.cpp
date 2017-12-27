@@ -6,33 +6,22 @@
  */
 #include "ftnoir_filter_accela.h"
 #include <algorithm>
-#include <cmath>
 #include <QDebug>
 #include <QMutexLocker>
 #include "api/plugin-api.hpp"
 
-using std::fabs;
-using std::sqrt;
-using std::pow;
-using std::copysign;
-using std::fmin;
+#include "compat/math-imports.hpp"
 
-constexpr double settings_accela::rot_gains[16][2];
-constexpr double settings_accela::pos_gains[16][2];
+constexpr settings_accela::gains settings_accela::rot_gains[16];
+constexpr settings_accela::gains settings_accela::pos_gains[16];
 
 accela::accela() : first_run(true)
 {
     s.make_splines(spline_rot, spline_pos);
 }
 
-template <typename T>
-static inline constexpr T signum(T x)
-{
-    return T((T(0) < x) - (x < T(0)));
-}
-
 template<int N = 3, typename F>
-OTR_NEVER_INLINE
+never_inline
 static void do_deltas(const double* deltas, double* output, double alpha, double& smoothed, F&& fun)
 {
     double norm[N];
@@ -44,7 +33,8 @@ static void do_deltas(const double* deltas, double* output, double alpha, double
         return sqrt(ret);
     );
 
-    const double dist = smoothed = fmin(dist_, alpha*dist_ + (1-alpha)*smoothed);
+    const double dist = fmin(dist_, alpha*dist_ + (1-alpha)*smoothed);
+    smoothed = dist;
     const double value = double(fun(dist));
 
     for (unsigned k = 0; k < N; k++)
@@ -78,18 +68,26 @@ static void do_deltas(const double* deltas, double* output, double alpha, double
 
 void accela::filter(const double* input, double *output)
 {
-    if (first_run)
+    if (unlikely(first_run))
     {
+        first_run = false;
+
         for (int i = 0; i < 6; i++)
         {
             const double f = input[i];
             output[i] = f;
             last_output[i] = f;
         }
-        first_run = false;
+
         smoothed_input[0] = 0;
         smoothed_input[1] = 0;
+
         t.start();
+#if defined DEBUG_ACCELA
+        debug_max = 0;
+        debug_timer.start();
+#endif
+
         return;
     }
 
@@ -103,7 +101,6 @@ void accela::filter(const double* input, double *output)
     const double alpha = dt/(dt+RC);
     const double rot_dz = s.rot_deadzone.to<double>();
     const double pos_dz = s.pos_deadzone.to<double>();
-    const double nl = s.rot_nonlinearity.to<double>();
 
     // rot
 
@@ -119,18 +116,25 @@ void accela::filter(const double* input, double *output)
         deltas[i] = d / rot_thres;
     }
 
-    if (nl > 1.)
-    {
-        for (unsigned k = 3; k < 6; k++)
-        {
-            static constexpr double nl_end = 1.5;
-
-            if (fabs(deltas[k]) <= nl_end)
-                deltas[k] = copysign(pow(fabs(deltas[k]/nl_end), nl) * nl_end, deltas[k]);
-        }
-    }
-
     do_deltas(&deltas[Yaw], &output[Yaw], alpha, smoothed_input[0], [this](double x) { return spline_rot.get_value_no_save(x); });
+
+#if defined DEBUG_ACCELA
+    var.input(fabs(smoothed_input[0]) + fabs(smoothed_input[1]) + fabs(smoothed_input[2]));
+    debug_max = fmax(debug_max, smoothed_input[0]);
+
+    using time_units::secs_;
+
+    if (debug_timer.is_elapsed(secs_(1)))
+    {
+        qDebug() << "accela:"
+                 << "max" << debug_max
+                 << "mean" << var.avg()
+                 << "stddev/mean" << var.stddev() / var.avg();
+
+        var.clear();
+        debug_max = 0;
+    }
+#endif
 
     // pos
 
@@ -154,30 +158,20 @@ void accela::filter(const double* input, double *output)
         output[k] *= dt;
         output[k] += last_output[k];
 
-        if (signum(last_output[k] - output[k]) >= 0)
-            output[k] = std::fmax(input[k], output[k]);
-        else
-            output[k] = std::fmin(input[k], output[k]);
-
         last_output[k] = output[k];
     }
 }
 
-void settings_accela::make_splines(spline& rot, spline& trans)
+void settings_accela::make_splines(spline& rot, spline& pos)
 {
     rot = spline();
-    trans = spline();
+    pos = spline();
 
-    rot.set_max_input(rot_gains[0][0]);
-    trans.set_max_input(pos_gains[0][0]);
-    rot.set_max_output(rot_gains[0][1]);
-    trans.set_max_output(pos_gains[0][1]);
+    for (const auto& val : rot_gains)
+        rot.add_point(QPointF(val.x, val.y));
 
-    for (int i = 0; rot_gains[i][0] >= 0; i++)
-        rot.add_point(QPointF(rot_gains[i][0], rot_gains[i][1]));
-
-    for (int i = 0; pos_gains[i][0] >= 0; i++)
-        trans.add_point(QPointF(pos_gains[i][0], pos_gains[i][1]));
+    for (const auto& val : pos_gains)
+        pos.add_point(QPointF(val.x, val.y));
 }
 
 OPENTRACK_DECLARE_FILTER(accela, dialog_accela, accelaDll)

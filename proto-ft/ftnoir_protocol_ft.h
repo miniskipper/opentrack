@@ -7,45 +7,38 @@
  */
 
 #pragma once
+
 #include "ui_ftnoir_ftcontrols.h"
-#include "api/plugin-api.hpp"
-#include <QMessageBox>
-#include <QSettings>
-#include <QLibrary>
-#include <QProcess>
-#include <QDebug>
-#include <QFile>
-#include <QString>
-#include <QMutex>
-#include <QMutexLocker>
+
+#include "freetrackclient/fttypes.h"
+
 #include "compat/shm.h"
 #include "options/options.hpp"
-#include "freetrackclient/fttypes.h"
+#include "api/plugin-api.hpp"
+
+#include <QProcess>
+#include <QString>
+#include <QMutex>
+
+#include <cinttypes>
 #include <memory>
-#include "mutex.hpp"
 
 using namespace options;
 
 struct settings : opts {
     value<int> intUsedInterface;
-    value<bool> useTIRViews, close_protocols_on_exit;
     settings() :
         opts("proto-freetrack"),
-        intUsedInterface(b, "used-interfaces", 0),
-        useTIRViews(b, "use-memory-hacks", false),
-        close_protocols_on_exit(b, "close-protocols-on-exit", false)
+        intUsedInterface(b, "used-interfaces", 0)
     {}
 };
-
-typedef void (__stdcall *importTIRViewsStart)(void);
-typedef void (__stdcall *importTIRViewsStop)(void);
 
 class freetrack : public IProtocol
 {
 public:
     freetrack();
     ~freetrack() override;
-    bool correct();
+    module_status initialize() override;
     void pose( const double *headpose );
     QString game_name() override {
         QMutexLocker foo(&game_name_mutex);
@@ -53,20 +46,15 @@ public:
     }
 private:
     settings s;
-    PortableLockedShm shm;
-    FTHeap *pMemData;
+    shm_wrapper shm { FREETRACK_HEAP, FREETRACK_MUTEX, sizeof(FTHeap) };
+    FTHeap volatile *pMemData { (FTHeap*) shm.ptr() };
 
-    QLibrary FTIRViewsLib;
     QProcess dummyTrackIR;
-    importTIRViewsStart viewsStart;
-    importTIRViewsStop viewsStop;
 
-    int intGameID;
+    int intGameID = -1;
     QString connected_game;
     QMutex game_name_mutex;
-    static check_for_first_run runonce_check;
 
-    void start_tirviews();
     void start_dummy();
     static float degrees_to_rads(double degrees);
 
@@ -93,6 +81,6 @@ private slots:
 class freetrackDll : public Metadata
 {
 public:
-    QString name() { return QString(QCoreApplication::translate("freetrackDll", "freetrack 2.0 Enhanced")); }
+    QString name() { return otr_tr("freetrack 2.0 Enhanced"); }
     QIcon icon() { return QIcon(":/images/freetrack.png"); }
 };

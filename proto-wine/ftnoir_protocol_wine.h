@@ -18,14 +18,16 @@ public:
     wine();
     ~wine() override;
 
-    bool correct() override;
+    module_status initialize() override;
     void pose(const double* headpose) override;
-    QString game_name() override {
+
+    QString game_name() override
+    {
         QMutexLocker foo(&game_name_mutex);
         return connected_game;
     }
 private:
-    PortableLockedShm lck_shm;
+    shm_wrapper lck_shm;
     WineSHM* shm;
     QProcess wrapper;
     int gameid;

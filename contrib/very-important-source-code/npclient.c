@@ -1,14 +1,21 @@
+#define _USE_MATH_DEFINES
+
 #include <stdarg.h>
 #include <stdlib.h>
-#include <stdio.h>
+#include <stdbool.h>
+#include <math.h>
 #include <string.h>
+#include <stdio.h>
+
 #include <windows.h>
-#include <tchar.h>
 
 #define FREETRACK_MUTEX "FT_Mutext"
 #define FT_MM_DATA "FT_SharedMem"
 
-typedef struct TFreeTrackData {
+#define UNUSED(var) (void)var
+
+typedef struct TFreeTrackData
+{
     int DataID;
     int CamWidth;
     int CamHeight;
@@ -34,24 +41,25 @@ typedef struct TFreeTrackData {
     float Y4;
 } TFreeTrackData;
 
-typedef struct FTMemMap {
+typedef struct FTMemMap
+{
     TFreeTrackData data;
     __int32 GameId;
     unsigned char table[8];
     __int32 GameId2;
 } FTMemMap;
 
-static BOOL bEncryptionChecked = FALSE;
+static bool bEncryptionChecked = false;
 static double r = 0, p = 0, y = 0, tx = 0, ty = 0, tz = 0;
 
 #define NP_DECLSPEC __declspec(dllexport)
 #define NP_EXPORT(t) t NP_DECLSPEC __stdcall
-#define NP_AXIS_MAX                             16383
+#define NP_AXIS_MAX 16384
 
-static BOOL FTCreateMapping(void);
+static bool FTCreateMapping(void);
 static void FTDestroyMapping(void);
-static __inline double scale2AnalogLimits( double x, double min_x, double max_x );
-static __inline double getDegreesFromRads ( double rads );
+static __inline double clamp(double x, double xmin, double xmax);
+static __inline double clamp_(double x);
 
 #if DEBUG
 static FILE *debug_stream;
@@ -60,29 +68,38 @@ static FILE *debug_stream;
 #define dbg_report(...)
 #endif
 
+typedef enum npclient_status_ {
+    NPCLIENT_STATUS_OK,
+    NPCLIENT_STATUS_DISABLED
+} npclient_status;
+
 static HANDLE hFTMemMap = 0;
-static FTMemMap *pMemData = 0;
-static HANDLE hFTMutex = 0;
-static BOOL bEncryption = FALSE;
+static FTMemMap volatile * pMemData = 0;
+static bool bEncryption = false;
 static unsigned char table[] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 
-typedef struct tir_data{
+typedef struct tir_data
+{
     short status;
     short frame;
-    unsigned int cksum;
+    unsigned cksum;
     float roll, pitch, yaw;
     float tx, ty, tz;
     float padding[9];
 } tir_data_t;
 
-typedef struct tir_signature{
+typedef struct tir_signature
+{
     char DllSignature[200];
     char AppSignature[200];
 } tir_signature_t;
 
 BOOL DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
 {
-    switch (fdwReason) {
+    UNUSED(lpvReserved);
+
+    switch (fdwReason)
+    {
     case DLL_PROCESS_ATTACH:
 #if DEBUG
         debug_stream = fopen("c:\\NPClient.log", "a");
@@ -95,14 +112,18 @@ BOOL DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
         dbg_report("DllMain: (%p, %ld, %p)\n", (void*) hinstDLL, (long) fdwReason, lpvReserved);
         dbg_report("DllMain: Attach request\n");
         DisableThreadLibraryCalls(hinstDLL);
+#if 0
         timeBeginPeriod(1);
+#endif
         break;
 
     case DLL_PROCESS_DETACH:
         dbg_report("DllMain: Detach\n");
         dbg_report("DllMain: (%p, %ld, %p)\n", (void*) hinstDLL, (long) fdwReason, lpvReserved);
         dbg_report("==========================================================================================\n");
+#if 0
         timeEndPeriod(1);
+#endif
         FTDestroyMapping();
         break;
     }
@@ -180,7 +201,7 @@ NP_EXPORT(int) NPPriv_SetVersion(void)
 }
 
 /* TIR5 requires a checksum to be calculated over the headpose-data and to be relayed to the game. */
-static unsigned int cksum(unsigned char buf[], unsigned int size)
+static unsigned cksum(unsigned char buf[], unsigned size)
 {
     int rounds = size >> 2;
     int rem = size % 4;
@@ -188,11 +209,11 @@ static unsigned int cksum(unsigned char buf[], unsigned int size)
     int c = size;
     int a0, a2;
 
-    if((size == 0) || (buf == NULL)){
+    if (size == 0 || buf == NULL)
         return 0;
-    }
 
-    while(rounds != 0){
+    while (rounds != 0)
+    {
         a0 = *(short int*)buf;
         a2 = *(short int*)(buf+2);
         buf += 4;
@@ -203,7 +224,8 @@ static unsigned int cksum(unsigned char buf[], unsigned int size)
         c += (c >> 11);
         --rounds;
     }
-    switch(rem){
+    switch (rem)
+    {
     case 3:
         a0 = *(short int*)buf;
         a2 = *(signed char*)(buf+2);
@@ -227,9 +249,8 @@ static unsigned int cksum(unsigned char buf[], unsigned int size)
     default:
         break;
     }
-    if(rem != 0){
+    if(rem != 0)
         c+=a2;
-    }
 
     c ^= (c << 3);
     c += (c >> 5);
@@ -238,28 +259,29 @@ static unsigned int cksum(unsigned char buf[], unsigned int size)
     c ^= (c << 25);
     c += (c >> 6);
 
-    return (unsigned int)c;
+    return (unsigned)c;
 }
 
-static __inline void enhance(unsigned char buf[], unsigned int size,
-             unsigned char table[], int table_size)
+static __inline void enhance(unsigned char buf[], unsigned size, unsigned char table[], unsigned table_size)
 {
-  unsigned int table_ptr = 0;
+  unsigned table_ptr = 0;
   unsigned char var = 0x88;
   unsigned char tmp;
-  if((size <= 0) || (table_size <= 0) ||
-     (buf == NULL) || (table == NULL)){
+
+  if (size <= 0 || table_size <= 0 || buf == NULL || table == NULL)
     return;
-  }
-  do{
+
+  do
+  {
     tmp = buf[--size];
     buf[size] = tmp ^ table[table_ptr] ^ var;
     var += size + tmp;
     ++table_ptr;
-    if(table_ptr >= table_size){
+
+    if (table_ptr >= table_size)
       table_ptr -= table_size;
-    }
-  }while(size != 0);
+  }
+  while (size != 0);
 }
 
 /******************************************************************
@@ -279,48 +301,53 @@ NP_EXPORT(int) NP_GetData(tir_data_t * data)
         return 0;
     }
 
-    if (pMemData && hFTMutex && WaitForSingleObject(hFTMutex, 15) == WAIT_OBJECT_0) {
+    if (pMemData)
+    {
 #if DEBUG
         recv = 1;
 #endif
-        y = getDegreesFromRads( pMemData->data.Yaw );
-        p = getDegreesFromRads( pMemData->data.Pitch );
-        r = getDegreesFromRads( pMemData->data.Roll );
-        tx = pMemData->data.X;
-        ty = pMemData->data.Y;
-        tz = pMemData->data.Z;
+        y = pMemData->data.Yaw   * NP_AXIS_MAX / M_PI;
+        p = pMemData->data.Pitch * NP_AXIS_MAX / M_PI;
+        r = pMemData->data.Roll  * NP_AXIS_MAX / M_PI;
 
-        if (!bEncryptionChecked) {
+        tx = pMemData->data.X * NP_AXIS_MAX / 500.;
+        ty = pMemData->data.Y * NP_AXIS_MAX / 500.;
+        tz = pMemData->data.Z * NP_AXIS_MAX / 500.;
+
+        if (pMemData->GameId == pMemData->GameId2 && !bEncryptionChecked)
+        {
             dbg_report("NP_GetData: game = %d\n", pMemData->GameId);
-            memcpy(table, pMemData->table, 8);
+            bEncryptionChecked = true;
+            memcpy(table, (void*)pMemData->table, 8);
             for (i = 0; i < 8; i++)
                 if (table[i])
                 {
-                    bEncryption = TRUE;
+                    bEncryption = true;
                     break;
                 }
             dbg_report("NP_GetData: Table = %02d %02d %02d %02d %02d %02d %02d %02d\n", table[0],table[1],table[2],table[3],table[4],table[5], table[6], table[7]);
-            bEncryptionChecked = pMemData->GameId2 == pMemData->GameId;
         }
-
-        ReleaseMutex(hFTMutex);
     }
 
-    data->frame = frameno += 1;
-    data->status = 0;
+    frameno++;
+    data->frame = frameno;
+
+    bool running = y != 0 || p != 0 || r != 0 ||
+                   tx != 0 || ty != 0 || tz != 0;
+
+    data->status = running ? NPCLIENT_STATUS_OK : NPCLIENT_STATUS_DISABLED;
     data->cksum = 0;
 
-    data->roll  = scale2AnalogLimits (r, -180.0, 180.0);
-    data->pitch = scale2AnalogLimits (p, -180.0, 180.0);
-    data->yaw   = scale2AnalogLimits (y, -180.0, 180.0);
+    data->roll  = clamp_(r);
+    data->pitch = clamp_(p);
+    data->yaw   = clamp_(y);
 
-    data->tx = scale2AnalogLimits (tx, -500.0, 500.0);
-    data->ty = scale2AnalogLimits (ty, -500.0, 500.0);
-    data->tz = scale2AnalogLimits (tz, -500.0, 500.0);
+    data->tx = clamp_(tx);
+    data->ty = clamp_(ty);
+    data->tz = clamp_(tz);
 
-    for(i = 0; i < 9; ++i) {
+    for(i = 0; i < 9; ++i)
         data->padding[i] = 0.0;
-    }
 
 #if DEBUG
     dbg_report("GetData: rotation: %d %f %f %f\n", recv, data->yaw, data->pitch, data->roll);
@@ -328,11 +355,10 @@ NP_EXPORT(int) NP_GetData(tir_data_t * data)
 
     data->cksum = cksum((unsigned char*)data, sizeof(tir_data_t));
 
-    if(bEncryption) {
+    if (bEncryption)
         enhance((unsigned char*)data, sizeof(tir_data_t), table, sizeof(table));
-    }
 
-    return 0;
+    return running ? NPCLIENT_STATUS_OK : NPCLIENT_STATUS_DISABLED;
 }
 /******************************************************************
  *              NP_GetParameter (NPCLIENT.9)
@@ -340,6 +366,7 @@ NP_EXPORT(int) NP_GetData(tir_data_t * data)
 
 NP_EXPORT(int) NP_GetParameter(int arg0, int arg1)
 {
+    UNUSED(arg0); UNUSED(arg1);
     dbg_report("GetParameter request: %d %d\n", arg0, arg1);
     return (int) 0;
 }
@@ -434,8 +461,6 @@ NP_EXPORT(int) NP_GetSignature(tir_signature_t * sig)
         sig->DllSignature[i] = part1_2[i] ^ part1_1[i];
     for (i = 0; i < 200; i++)
         sig->AppSignature[i] = part2_1[i] ^ part2_2[i];
-    memset(sig->DllSignature + strlen(sig->DllSignature), 0, 200 - strlen(sig->DllSignature));
-    memset(sig->AppSignature + strlen(sig->AppSignature), 0, 200 - strlen(sig->AppSignature));
     return 0;
 }
 
@@ -472,6 +497,7 @@ NP_EXPORT(int) NP_RegisterProgramProfileID(unsigned short id)
 
 NP_EXPORT(int) NP_RegisterWindowHandle(HWND hwnd)
 {
+    UNUSED(hwnd);
     dbg_report("RegisterWindowHandle request: %p\n", (void*) hwnd);
     return (int) 0;
 }
@@ -481,6 +507,7 @@ NP_EXPORT(int) NP_RegisterWindowHandle(HWND hwnd)
 
 NP_EXPORT(int) NP_RequestData(unsigned short req)
 {
+    UNUSED(req);
     dbg_report("RequestData request: %d\n", req);
     return (int) 0;
 }
@@ -490,6 +517,7 @@ NP_EXPORT(int) NP_RequestData(unsigned short req)
 
 NP_EXPORT(int) NP_SetParameter(int arg0, int arg1)
 {
+    UNUSED(arg0); UNUSED(arg1);
     dbg_report("SetParameter request: %d %d\n", arg0, arg1);
     return (int) 0;
 }
@@ -539,49 +567,43 @@ NP_EXPORT(int) NP_UnregisterWindowHandle(void)
     return (int) 0;
 }
 
-static BOOL FTCreateMapping(void)
+static bool FTCreateMapping(void)
 {
-    BOOL bMappingExists = FALSE;
-
     if (pMemData)
-        return TRUE;
+        return true;
 
     dbg_report("FTCreateMapping request (pMemData == NULL).\n");
 
-    hFTMutex = CreateMutexA(NULL, FALSE, FREETRACK_MUTEX);
-    hFTMemMap = CreateFileMappingA( INVALID_HANDLE_VALUE, 00, PAGE_READWRITE, 0, sizeof( FTMemMap ), (LPCSTR) FT_MM_DATA );
-    pMemData = (FTMemMap *) MapViewOfFile(hFTMemMap, FILE_MAP_WRITE, 0, 0, sizeof( FTMemMap ) );
-    return pMemData != NULL && hFTMutex != NULL;
+    HANDLE hFTMutex = CreateMutexA(NULL, FALSE, FREETRACK_MUTEX);
+    CloseHandle(hFTMutex);
+
+    hFTMemMap = CreateFileMappingA(INVALID_HANDLE_VALUE, 0, PAGE_READWRITE, 0, sizeof(FTMemMap), (LPCSTR) FT_MM_DATA);
+    pMemData = (FTMemMap *) MapViewOfFile(hFTMemMap, FILE_MAP_WRITE, 0, 0, sizeof(FTMemMap));
+    return pMemData != NULL;
 }
 
 static void FTDestroyMapping(void)
 {
-    if ( pMemData != NULL ) {
-        UnmapViewOfFile ( pMemData );
-    }
+    if (pMemData != NULL)
+        UnmapViewOfFile((void*)pMemData);
 
-    CloseHandle( hFTMutex );
-    CloseHandle( hFTMemMap );
+    CloseHandle(hFTMemMap);
     pMemData = 0;
     hFTMemMap = 0;
 }
 
-static __inline double getDegreesFromRads ( double rads ) { 
-    return (rads * 57.295781);
+static __inline double clamp(double x, double xmin, double xmax)
+{
+    if (x > xmax)
+        return xmax;
+
+    if (x < xmin)
+        return xmin;
+
+    return x;
 }
 
-static __inline double scale2AnalogLimits( double x, double min_x, double max_x ) {
-    double y;
-    double local_x;
-
-    local_x = x;
-    if (local_x > max_x) {
-        local_x = max_x;
-    }
-    if (local_x < min_x) {
-        local_x = min_x;
-    }
-    y = ( NP_AXIS_MAX * local_x ) / max_x;
-
-    return y;
+static __inline double clamp_(double x)
+{
+    return clamp(x, -NP_AXIS_MAX, NP_AXIS_MAX);
 }

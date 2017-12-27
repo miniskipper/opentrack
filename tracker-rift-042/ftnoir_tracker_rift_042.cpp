@@ -36,22 +36,17 @@ rift_tracker_042::~rift_tracker_042()
     ovr_Shutdown();
 }
 
-void rift_tracker_042::start_tracker(QFrame*)
+module_status rift_tracker_042::start_tracker(QFrame*)
 {
     ovr_Initialize();
     hmd = ovrHmd_Create(0);
     if (hmd)
     {
         ovrHmd_ConfigureTracking(hmd, ovrTrackingCap_Orientation | ovrTrackingCap_MagYawCorrection | ovrTrackingCap_Position, ovrTrackingCap_Orientation);
+        return status_ok();
     }
     else
-    {
-        QMessageBox::warning(nullptr,
-                             "Error",
-                             QCoreApplication::translate("rift_tracker_042", "Unable to start Rift tracker: %1").arg(ovrHmd_GetLastError(nullptr)),
-                             QMessageBox::Ok,
-                             QMessageBox::NoButton);
-    }
+        return error(tr("Unable to start Rift tracker: %1").arg(ovrHmd_GetLastError(nullptr)));
 }
 
 
@@ -67,8 +62,8 @@ void rift_tracker_042::data(double *data)
         ovrTrackingState ss = ovrHmd_GetTrackingState(hmd, 0);
         if (ss.StatusFlags & ovrStatus_OrientationTracked)
         {
-            static constexpr float c_mult = 16;
-            static constexpr float c_div = 1/c_mult;
+            constexpr float c_mult = 16;
+            constexpr float c_div = 1/c_mult;
 
             Vector3f axis;
             float angle;
@@ -90,7 +85,7 @@ void rift_tracker_042::data(double *data)
                     yaw_ += s.constant_drift;
                 old_yaw = yaw_;
             }
-            static constexpr double d2r = 180 / M_PI;
+            constexpr double d2r = 180 / M_PI;
             data[Yaw] = yaw_ * -d2r;
             data[Pitch] = double(pitch) * d2r;
             data[Roll] = double(roll) * d2r;

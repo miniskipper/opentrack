@@ -50,12 +50,9 @@ class fsuipc : public IProtocol
 public:
     fsuipc();
     ~fsuipc() override;
-    bool correct();
+    module_status initialize() override;
     void pose(const double* headpose);
-    QString game_name()
-    {
-        return QCoreApplication::translate("fsuipc", "Microsoft Flight Simulator X");
-    }
+    QString game_name() { return otr_tr("Microsoft Flight Simulator X"); }
 private:
     QLibrary FSUIPCLib;
     double prevPosX, prevPosY, prevPosZ, prevRotX, prevRotY, prevRotZ;
@@ -84,7 +81,7 @@ private slots:
 class fsuipcDll : public Metadata
 {
 public:
-    QString name() { return QString(QCoreApplication::translate("fsuipcDll", "FSUIPC -- Microsoft FS2002/FS2004")); }
+    QString name() { return otr_tr("FSUIPC -- Microsoft FS2002/FS2004"); }
     QIcon icon() { return QIcon(":/images/fs9.png"); }
 };
 

@@ -15,12 +15,15 @@
 #include <QWidget>
 #include <QDialog>
 
+#include "compat/simple-mat.hpp"
 #include "export.hpp"
 
+using Pose = Mat<double, 6, 1>;
+
 enum Axis {
-    TX = 0, TY = 1, TZ = 2, Yaw = 3, Pitch = 4, Roll = 5,
-    // for indexing in general
-    rYaw = 0, rPitch = 1, rRoll = 2,
+    TX, TY, TZ, Yaw, Pitch, Roll,
+
+    NonAxis = -1,
 };
 
 namespace plugin_api {
@@ -79,8 +82,24 @@ struct OTR_API_EXPORT Metadata
     virtual ~Metadata();
 };
 
+struct OTR_API_EXPORT module_status final
+{
+    QString error;
+
+    bool is_ok() const;
+    module_status(const QString& error = QString());
+};
+
+struct OTR_API_EXPORT module_status_mixin
+{
+    static module_status status_ok();
+    static module_status error(const QString& error);
+
+    virtual module_status initialize() = 0;
+};
+
 // implement this in filters
-struct OTR_API_EXPORT IFilter
+struct OTR_API_EXPORT IFilter : module_status_mixin
 {
     IFilter(const IFilter&) = delete;
     IFilter(IFilter&&) = delete;
@@ -101,7 +120,7 @@ struct OTR_API_EXPORT IFilterDialog : public plugin_api::detail::BaseDialog
     IFilterDialog();
 
     // optional destructor
-    virtual ~IFilterDialog();
+    //~IFilterDialog() override;
     // receive a pointer to the filter from ui thread
     virtual void register_filter(IFilter* filter) = 0;
     // received filter pointer is about to get deleted
@@ -113,7 +132,7 @@ struct OTR_API_EXPORT IFilterDialog : public plugin_api::detail::BaseDialog
     OPENTRACK_DECLARE_PLUGIN_INTERNAL(filter_class, IFilter, metadata_class, dialog_class, IFilterDialog)
 
 // implement this in protocols
-struct OTR_API_EXPORT IProtocol
+struct OTR_API_EXPORT IProtocol : module_status_mixin
 {
     IProtocol();
 
@@ -123,10 +142,8 @@ struct OTR_API_EXPORT IProtocol
 
     // optional destructor
     virtual ~IProtocol();
-    // return true if protocol was properly initialized
-    virtual bool correct() = 0;
     // called 250 times a second with XYZ yaw pitch roll pose
-    // try not to perform intense computation here. if you must, use a thread.
+    // try not to perform intense computation here. use a thread.
     virtual void pose(const double* headpose) = 0;
     // return game name or placeholder text
     virtual QString game_name() = 0;
@@ -135,7 +152,7 @@ struct OTR_API_EXPORT IProtocol
 struct OTR_API_EXPORT IProtocolDialog : public plugin_api::detail::BaseDialog
 {
     // optional destructor
-    virtual ~IProtocolDialog();
+    // ~IProtocolDialog() override;
     // receive a pointer to the protocol from ui thread
     virtual void register_protocol(IProtocol *protocol) = 0;
     // received protocol pointer is about to get deleted
@@ -151,26 +168,30 @@ struct OTR_API_EXPORT IProtocolDialog : public plugin_api::detail::BaseDialog
 // implement this in trackers
 struct OTR_API_EXPORT ITracker
 {
-    ITracker(const ITracker&) = delete;
-    ITracker(ITracker&&) = delete;
-    ITracker& operator=(const ITracker&) = delete;
     ITracker();
 
     // optional destructor
     virtual ~ITracker();
     // start tracking, and grab a frame to display webcam video in, optionally
-    virtual void start_tracker(QFrame* frame) = 0;
+    virtual module_status start_tracker(QFrame* frame) = 0;
     // return XYZ yaw pitch roll data. don't block here, use a separate thread for computation.
     virtual void data(double *data) = 0;
     // tracker notified of centering
     // returning true makes identity the center pose
-    virtual bool center() { return false; }
+    virtual bool center();
+
+    static module_status status_ok();
+    static module_status error(const QString& error);
+
+    ITracker(const ITracker&) = delete;
+    ITracker(ITracker&&) = delete;
+    ITracker& operator=(const ITracker&) = delete;
 };
 
 struct OTR_API_EXPORT ITrackerDialog : public plugin_api::detail::BaseDialog
 {
     // optional destructor
-    virtual ~ITrackerDialog();
+    //~ITrackerDialog() override;
     // receive a pointer to the tracker from ui thread
     virtual void register_tracker(ITracker *tracker);
     // received tracker pointer is about to get deleted
@@ -182,3 +203,50 @@ struct OTR_API_EXPORT ITrackerDialog : public plugin_api::detail::BaseDialog
 // call once with your chosen class names in the plugin
 #define OPENTRACK_DECLARE_TRACKER(tracker_class, dialog_class, metadata_class) \
     OPENTRACK_DECLARE_PLUGIN_INTERNAL(tracker_class, ITracker, metadata_class, dialog_class, ITrackerDialog)
+
+struct OTR_API_EXPORT IExtension : module_status_mixin
+{
+    enum event_mask : unsigned
+    {
+        none = 0u,
+        on_raw              = 1 << 0,
+        on_before_filter    = 1 << 1,
+        on_before_mapping   = 1 << 2,
+        on_finished         = 1 << 3,
+    };
+
+    enum event_ordinal : unsigned
+    {
+        ev_raw                 = 0,
+        ev_before_filter       = 1,
+        ev_before_mapping      = 2,
+        ev_finished            = 3,
+
+        event_count = 4,
+    };
+
+    IExtension() = default;
+    virtual ~IExtension();
+
+    virtual event_mask hook_types() = 0;
+
+    virtual void process_raw(Pose&) {}
+    virtual void process_before_filter(Pose&) {}
+    virtual void process_before_mapping(Pose&) {}
+    virtual void process_finished(Pose&) {}
+
+    IExtension(const IExtension&) = delete;
+    IExtension(IExtension&&) = delete;
+    IExtension& operator=(const IExtension&) = delete;
+};
+
+struct OTR_API_EXPORT IExtensionDialog : public plugin_api::detail::BaseDialog
+{
+    ~IExtensionDialog() override;
+
+    virtual void register_extension(IExtension& ext) = 0;
+    virtual void unregister_extension() = 0;
+};
+
+#define OPENTRACK_DECLARE_EXTENSION(ext_class, dialog_class, metadata_class) \
+    OPENTRACK_DECLARE_PLUGIN_INTERNAL(ext_class, IExtension, metadata_class, dialog_class, IExtensionDialog)

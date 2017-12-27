@@ -11,13 +11,17 @@
 #include "api/plugin-api.hpp"
 #include "ftnoir_tracker_pt_settings.h"
 
-#include "numeric.hpp"
+#include "cv/numeric.hpp"
 
 #include "camera.h"
 #include "point_extractor.h"
 #include "point_tracker.h"
 #include "cv/video-widget.hpp"
 #include "compat/util.hpp"
+
+#include <atomic>
+#include <memory>
+#include <vector>
 
 #include <QCoreApplication>
 #include <QThread>
@@ -26,9 +30,6 @@
 #include <QTime>
 #include <QLayout>
 #include <QSize>
-#include <atomic>
-#include <memory>
-#include <vector>
 
 class TrackerDialog_PT;
 
@@ -39,12 +40,13 @@ using namespace types;
 class Tracker_PT : public QThread, public ITracker
 {
     Q_OBJECT
+
     friend class camera_dialog;
     friend class ::TrackerDialog_PT;
 public:
     Tracker_PT();
     ~Tracker_PT() override;
-    void start_tracker(QFrame* parent_window) override;
+    module_status start_tracker(QFrame* parent_window) override;
     void data(double* data) override;
 
     Affine pose();
@@ -70,8 +72,8 @@ private:
     PointExtractor point_extractor;
     PointTracker   point_tracker;
 
-    qshared<cv_video_widget> video_widget;
-    qshared<QLayout> layout;
+    std::unique_ptr<cv_video_widget> video_widget;
+    std::unique_ptr<QLayout> layout;
 
     settings_pt s;
     cv::Mat frame, preview_frame;
@@ -79,9 +81,9 @@ private:
 
     QSize preview_size;
 
-    volatile unsigned point_count;
-    volatile unsigned char commands;
-    volatile bool ever_success;
+    std::atomic<unsigned> point_count;
+    std::atomic<unsigned char> commands;
+    std::atomic<bool> ever_success;
 
     static constexpr f rad2deg = f(180/M_PI);
     //static constexpr float deg2rad = float(M_PI/180);
@@ -91,7 +93,7 @@ private:
 
 class PT_metadata : public Metadata
 {
-    QString name() { return QString(QCoreApplication::translate("PT_metadata", "PointTracker 1.1")); }
+    QString name() { return otr_tr("PointTracker 1.1"); }
     QIcon icon() { return QIcon(":/Resources/Logo_IR.png"); }
 };
 

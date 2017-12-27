@@ -19,12 +19,12 @@ struct settings : opts {
     {}
 };
 
-class udp : public ITracker, protected QThread
+class udp : protected QThread, public ITracker
 {
 public:
     udp();
     ~udp() override;
-    void start_tracker(QFrame *) override;
+    module_status start_tracker(QFrame *) override;
     void data(double *data) override;
 protected:
     void run() override;
@@ -33,7 +33,6 @@ private:
     double last_recv_pose[6], last_recv_pose2[6];
     QMutex mutex;
     settings s;
-    volatile bool should_quit;
 };
 
 class dialog_udp: public ITrackerDialog
@@ -54,7 +53,7 @@ private slots:
 class udpDll : public Metadata
 {
 public:
-    QString name() { return QString(QCoreApplication::translate("udp_tracker", "UDP over network")); }
+    QString name() { return otr_tr("UDP over network"); }
     QIcon icon() { return QIcon(":/images/facetracknoir.png"); }
 };
 

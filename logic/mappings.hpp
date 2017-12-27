@@ -15,13 +15,13 @@ using namespace options;
 
 struct OTR_LOGIC_EXPORT Map final
 {
-    Map(QString primary, QString secondary, int max_x, int max_y, axis_opts& opts);
+    Map(const QString& spline_name, const QString& alt_spline_name, axis_opts& opts);
 
     void save();
     void load();
 
     axis_opts& opts;
-    QString name1, name2;
+    QString name, alt_name;
     spline spline_main, spline_alt;
 };
 
@@ -30,7 +30,17 @@ class OTR_LOGIC_EXPORT Mappings final
 private:
     Map axes[6];
 public:
-    Mappings(std::vector<axis_opts*> opts);
+    template<typename t>
+    Mappings(t& opts) :
+        axes {
+            { "spline-X", "alt-spline-X", *opts[TX] },
+            { "spline-Y", "alt-spline-Y", *opts[TY] },
+            { "spline-Z", "alt-spline-Z", *opts[TZ] },
+            { "spline-yaw", "alt-spline-yaw", *opts[Yaw] },
+            { "spline-pitch", "alt-spline-pitch", *opts[Pitch] },
+            { "spline-roll", "alt-spline-roll", *opts[Roll] }
+        }
+    {}
 
     Map& operator()(int i) { return axes[i]; }
     const Map& operator()(int i) const { return axes[i]; }

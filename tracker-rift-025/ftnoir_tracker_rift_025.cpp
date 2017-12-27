@@ -41,8 +41,10 @@ rift_tracker_025::~rift_tracker_025()
     System::Destroy();
 }
 
-void rift_tracker_025::start_tracker(QFrame*)
+module_status rift_tracker_025::start_tracker(QFrame*)
 {
+    QString err;
+
     System::Init(Log::ConfigureDefaultLog(LogMask_All));
     pManager = DeviceManager::Create();
     if (pManager != NULL)
@@ -59,29 +61,19 @@ void rift_tracker_025::start_tracker(QFrame*)
                 pSFusion->AttachToSensor(pSensor);
             }
             else
-            {
-                QMessageBox::warning(nullptr,
-                                     QCoreApplication::translate("rift_tracker_025", "Error"),
-                                     QCoreApplication::translate("rift_tracker_025", "Unable to create Rift sensor"),
-                                     QMessageBox::Ok,QMessageBox::NoButton);
-            }
+                err = tr("Unable to create Rift sensor");
 
         }
         else
-        {
-            QMessageBox::warning(nullptr,
-                                 QCoreApplication::translate("rift_tracker_025", "Error"),
-                                 QCoreApplication::translate("rift_tracker_025", "Unable to enumerate Rift tracker"),
-                                 QMessageBox::Ok,QMessageBox::NoButton);
-        }
+            err = tr("Unable to enumerate Rift tracker");
     }
     else
-    {
-        QMessageBox::warning(nullptr,
-                             QCoreApplication::translate("rift_tracker_025", "Error"),
-                             QCoreApplication::translate("rift_tracker_025", "Unable to start Rift tracker"),
-                             QMessageBox::Ok,QMessageBox::NoButton);
-    }
+        err = tr("Unable to start Rift tracker");
+
+    if (err.isEmpty())
+        return status_ok();
+    else
+        return error(err);
 }
 
 
@@ -91,8 +83,8 @@ void rift_tracker_025::data(double *data)
     {
         Quatf rot = pSFusion->GetOrientation();
 
-        static constexpr float c_mult = 8;
-        static constexpr float c_div = 1/c_mult;
+        constexpr float c_mult = 8;
+        constexpr float c_div = 1/c_mult;
 
         Vector3f axis;
         float angle;
@@ -115,7 +107,7 @@ void rift_tracker_025::data(double *data)
             old_yaw = yaw_;
         }
 
-        static constexpr double r2d = 180 / M_PI;
+        constexpr double r2d = 180 / M_PI;
 
         data[Yaw] = yaw_ * r2d;
         data[Pitch] = double(pitch) * r2d;

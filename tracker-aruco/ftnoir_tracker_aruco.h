@@ -23,6 +23,7 @@
 #include <QDialog>
 #include <QTimer>
 
+#include <memory>
 #include <cinttypes>
 
 #include <opencv2/core.hpp>
@@ -30,6 +31,9 @@
 
 // value 0->1
 //#define DEBUG_UNSHARP_MASKING .75
+
+//canny thresholding
+//#define USE_EXPERIMENTAL_CANNY
 
 using namespace options;
 
@@ -61,7 +65,7 @@ struct settings : opts {
 
 class aruco_dialog;
 
-class aruco_tracker : protected QThread, public ITracker
+class aruco_tracker : protected virtual QThread, public ITracker
 {
     Q_OBJECT
     friend class aruco_dialog;
@@ -69,7 +73,7 @@ class aruco_tracker : protected QThread, public ITracker
 public:
     aruco_tracker();
     ~aruco_tracker() override;
-    void start_tracker(QFrame* frame) override;
+    module_status start_tracker(QFrame* frame) override;
     void data(double *data) override;
     void run() override;
     void getRT(cv::Matx33d &r, cv::Vec3d &t);
@@ -94,8 +98,8 @@ private:
     cv::VideoCapture camera;
     QMutex camera_mtx;
     QMutex mtx;
-    qshared<cv_video_widget> videoWidget;
-    qshared<QHBoxLayout> layout;
+    std::unique_ptr<cv_video_widget> videoWidget;
+    std::unique_ptr<QHBoxLayout> layout;
     settings s;
     double pose[6], fps, no_detection_timeout;
     cv::Mat frame, grayscale, color;
@@ -117,7 +121,6 @@ private:
     cv::Rect last_roi;
     Timer fps_timer, last_detection_timer;
     unsigned adaptive_size_pos;
-    volatile bool stop;
     bool use_otsu;
 
     struct resolution_tuple
@@ -128,11 +131,15 @@ private:
 
     static constexpr const int adaptive_sizes[] =
     {
+#if defined USE_EXPERIMENTAL_CANNY
+        3,
+        5,
+        7,
+#else
         7,
         9,
-        //11,
         13,
-        //5,
+#endif
     };
 
     static constexpr int adaptive_thres = 6;

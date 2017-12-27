@@ -29,7 +29,7 @@ class mouse : public IProtocol
 {
 public:
     mouse();
-    bool correct() override;
+    module_status initialize() override { return status_ok(); }
     void pose( const double *headpose) override;
     QString game_name() override;
 
@@ -59,6 +59,6 @@ private slots:
 class mouseDll : public Metadata
 {
 public:
-    QString name() { return QString(QCoreApplication::translate("mouseDll", "mouse emulation")); }
+    QString name() { return otr_tr("mouse emulation"); }
     QIcon icon() { return QIcon(":/images/mouse.png"); }
 };

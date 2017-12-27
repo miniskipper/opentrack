@@ -11,10 +11,7 @@
 #pragma once
 
 #include "ui_ftnoir_ftncontrols.h"
-#include <QThread>
 #include <QUdpSocket>
-#include <QMessageBox>
-#include <cmath>
 #include "api/plugin-api.hpp"
 #include "options/options.hpp"
 using namespace options;
@@ -31,24 +28,33 @@ struct settings : opts {
     {}
 };
 
-class udp : public IProtocol
+class udp : public QObject, public IProtocol
 {
+    Q_OBJECT
+
 public:
     udp();
-    bool correct();
+    module_status initialize() override;
     void pose(const double *headpose);
     QString game_name() {
-        return QCoreApplication::translate("udp_proto", "UDP over network");
+        return otr_tr("UDP over network");
     }
 private:
     QUdpSocket outSocket;
     settings s;
+
+    QHostAddress dest_ip { 127u << 24 | 1u };
+    unsigned short dest_port = 65535;
+
+private slots:
+    void set_dest_address();
 };
 
 // Widget that has controls for FTNoIR protocol client-settings.
 class FTNControls: public IProtocolDialog
 {
     Q_OBJECT
+
 public:
     FTNControls();
     void register_protocol(IProtocol *) {}
@@ -64,6 +70,6 @@ private slots:
 class udpDll : public Metadata
 {
 public:
-    QString name() { return QString(QCoreApplication::translate("udp_proto", "UDP over network")); }
+    QString name() { return otr_tr("UDP over network"); }
     QIcon icon() { return QIcon(":/images/facetracknoir.png"); }
 };

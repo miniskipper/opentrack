@@ -6,11 +6,9 @@ using namespace plugin_api::detail;
 
 Metadata::~Metadata() {}
 IFilter::~IFilter() {}
-IFilterDialog::~IFilterDialog() {}
 IProtocol::~IProtocol() {}
-IProtocolDialog::~IProtocolDialog() {}
 ITracker::~ITracker() {}
-ITrackerDialog::~ITrackerDialog() {}
+IExtension::~IExtension() {}
 
 void ITrackerDialog::register_tracker(ITracker*) {}
 void ITrackerDialog::unregister_tracker() {}
@@ -24,6 +22,18 @@ void BaseDialog::closeEvent(QCloseEvent*)
         hide();
         emit closing();
     }
+}
+
+bool ITracker::center() { return false; }
+
+module_status ITracker::status_ok()
+{
+    return module_status();
+}
+
+module_status ITracker::error(const QString& error)
+{
+    return module_status(error);
 }
 
 Metadata::Metadata() {}
@@ -42,3 +52,18 @@ void BaseDialog::done(int)
         close();
     }
 }
+
+IExtensionDialog::~IExtensionDialog()
+{
+}
+
+bool module_status::is_ok() const
+{
+    return error.isEmpty();
+}
+
+module_status::module_status(const QString& error) : error(error) {}
+
+module_status module_status_mixin::status_ok() { return module_status(); }
+
+module_status module_status_mixin::error(const QString& error) { return module_status(error); }

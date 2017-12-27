@@ -25,7 +25,7 @@ class rift_tracker_140 : public ITracker
 public:
     rift_tracker_140();
     ~rift_tracker_140() override;
-    void start_tracker(QFrame *) override;
+    module_status start_tracker(QFrame *) override;
     void data(double *data) override;
 private:
     double old_yaw;
@@ -54,7 +54,7 @@ private slots:
 class rift_140Dll : public Metadata
 {
 public:
-    QString name() { return QString(QCoreApplication::translate("rift_140Dll", "Oculus Rift runtime 1.4.0 -- HMD")); }
+    QString name() { return otr_tr("Oculus Rift runtime 1.4.0 -- HMD"); }
     QIcon icon() { return QIcon(":/images/rift_tiny.png"); }
 };
 

@@ -13,8 +13,8 @@ namespace detail {
 template<typename t, typename u = t, typename Enable = void>
 struct default_value_traits
 {
-    using element_type = remove_qualifiers<t>;
-    using value_type = u;
+    using element_type = std::decay_t<t>;
+    using value_type = std::decay_t<u>;
 
     static inline value_type from_value(const value_type& val, const value_type&) { return val; }
     static inline value_type from_storage(const element_type& x) { return static_cast<value_type>(x); }
@@ -37,7 +37,7 @@ struct value_traits<slider_value> : default_value_traits<slider_value>
 
 // Qt uses int a lot in slots so use it for all enums
 template<typename t>
-struct value_traits<t, t, std::enable_if_t<std::is_enum<t>::value>> : public default_value_traits<int, t>
+struct value_traits<t, t, std::enable_if_t<is_enum_v<t>>> : public default_value_traits<int, t>
 {
 };
 

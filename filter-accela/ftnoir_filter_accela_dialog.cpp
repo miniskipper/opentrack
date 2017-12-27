@@ -25,49 +25,40 @@ dialog_accela::dialog_accela()
     tie_setting(s.ewma, ui.ewma_slider);
     tie_setting(s.rot_deadzone, ui.rot_dz_slider);
     tie_setting(s.pos_deadzone, ui.trans_dz_slider);
-    tie_setting(s.rot_nonlinearity, ui.rot_nl_slider);
 
-    tie_setting(s.rot_sensitivity, ui.rot_gain, tr("%1°"), 0, 'g', 4);
-    tie_setting(s.pos_sensitivity, ui.trans_gain, tr("%1mm"));
-    tie_setting(s.ewma, ui.ewma_label, tr("%1ms"));
-    tie_setting(s.rot_deadzone, ui.rot_dz, tr("%1°"), 0, 'g', 4);
-    tie_setting(s.pos_deadzone, ui.trans_dz, tr("%1mm"));
-    tie_setting(s.rot_nonlinearity, ui.rot_nl,
-        tr("<html><head/><body>"
-           "<p>x<span style='vertical-align:super;'>"
-           "%1"
-           "</span></p>"
-           "</body></html>")
-    );
+    tie_setting(s.rot_sensitivity, ui.rot_gain, [](const slider_value& s) { return tr("%1°").arg(s, 0, 'g', 4); });
+    tie_setting(s.pos_sensitivity, ui.trans_gain, [](const slider_value& s) { return tr("%1mm").arg(s, 0, 'g', 4); });
+    tie_setting(s.ewma, ui.ewma_label, [](const slider_value& s) { return tr("%1ms").arg(s); });
+    tie_setting(s.rot_deadzone, ui.rot_dz, [](const slider_value& s) { return tr("%1°").arg(s, 0, 'g', 4); });
+    tie_setting(s.pos_deadzone, ui.trans_dz, [](const slider_value& s) { return tr("%1mm").arg(s); });
 
 //#define SPLINE_ROT_DEBUG
 //#define SPLINE_TRANS_DEBUG
 
 #if defined SPLINE_ROT_DEBUG || defined SPLINE_TRANS_DEBUG
     {
-        spline rot, trans;
-        s.make_splines(rot, trans);
-        QDialog dr, dt;
-        spline_widget r(&dr);
-        spline_widget t(&dt);
-        dr.setWindowTitle("Accela rotation gain"); r.set_preview_only(true); r.setEnabled(true);
-        r.setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed); r.setConfig(&rot);
-        dt.setWindowTitle("Accela translation gain"); t.set_preview_only(true); t.setEnabled(true);
-        r.setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed); t.setConfig(&trans);
-        r.setFixedSize(1024, 600); t.setFixedSize(1024, 600);
+        spline rot, pos;
+        s.make_splines(rot, pos);
 
 #ifdef SPLINE_ROT_DEBUG
+        QDialog dr;
+        spline_widget r(&dr);
+        dr.setWindowTitle("Accela rotation gain"); r.set_preview_only(true); r.setEnabled(true);
+        r.setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed); r.setConfig(&rot);
+        r.setFixedSize(1024, 600);
         dr.show();
+        dr.exec();
 #endif
 
 #ifdef SPLINE_TRANS_DEBUG
+        QDialog dt;
+        spline_widget t(&dt);
+        dt.setWindowTitle("Accela translation gain"); t.set_preview_only(true); t.setEnabled(true);
+        dt.setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed); t.setConfig(&pos);
+        t.setFixedSize(1024, 600);
         dt.show();
+        dt.exec();
 #endif
-
-        if (dr.isVisible())
-            dr.exec();
-        if (dt.isVisible())
-            dt.exec();
     }
 #endif
 }
